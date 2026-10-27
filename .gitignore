@@ -1,0 +1,23 @@
+# Machine-specific and secrets (NVR password lives in local.properties)
+local.properties
+*.keystore
+*.jks
+
+# Gradle / Android Studio
+.gradle/
+.kotlin/
+build/
+*/build/
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Test output and local artifacts
+probe-log.txt
+apk/
+*.apk
+
+# App logs pulled from the TV
+swanntv-log*.txt

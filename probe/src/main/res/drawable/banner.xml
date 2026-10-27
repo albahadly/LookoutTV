@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 320x180 TV banner: four camera tiles -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path android:fillColor="#0E1116" android:pathData="M0,0h320v180h-320z" />
+    <path android:fillColor="#26303C" android:pathData="M88,36h68v38h-68z" />
+    <path android:fillColor="#5B9BFF" android:pathData="M164,36h68v38h-68z" />
+    <path android:fillColor="#26303C" android:pathData="M88,82h68v38h-68z" />
+    <path android:fillColor="#26303C" android:pathData="M164,82h68v38h-68z" />
+    <path android:fillColor="#FF6B5F" android:pathData="M100,48m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+    <path android:fillColor="#AEB6C2" android:pathData="M88,136h144v8h-144z" />
+</vector>

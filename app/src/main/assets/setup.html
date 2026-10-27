@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>SwannTV setup</title>
+<style>
+  :root { --bg:#0E1116; --surface:#171B22; --tile:#1B2027; --border:#2E3541; --text:#E8EAED; --quiet:#AEB6C2; --accent:#5B9BFF; --onaccent:#0B1220; --error:#FFA39B; --ok:#6EE7A0; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { position:sticky; top:0; z-index:2; background:var(--bg); border-bottom:1px solid var(--border); padding:14px 16px; display:flex; align-items:center; gap:12px; }
+  header h1 { margin:0; font-size:18px; flex:1; }
+  #status { font-size:13px; color:var(--quiet); }
+  main { max-width:720px; margin:0 auto; padding:16px; display:flex; flex-direction:column; gap:20px; }
+  section { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px; }
+  section h2 { margin:0 0 4px; font-size:16px; }
+  .sub { margin:0 0 12px; font-size:13px; color:var(--quiet); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .cam { background:var(--tile); border:1px solid var(--border); border-radius:10px; padding:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+  .cam .info { flex:1 1 200px; min-width:0; }
+  .cam .name { font-weight:600; }
+  .cam .meta { font-size:12px; color:var(--quiet); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cam.hidden .name { color:var(--quiet); }
+  button { font:inherit; font-size:14px; font-weight:600; color:var(--text); background:var(--tile); border:1px solid var(--border); border-radius:8px; padding:9px 14px; min-height:40px; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:var(--onaccent); }
+  button.danger { color:var(--error); }
+  button.icon { min-width:40px; padding:9px 0; }
+  button:disabled { opacity:.45; cursor:default; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  label { display:block; font-size:13px; color:var(--quiet); margin:12px 0 4px; }
+  input[type=text], input[type=password], input[type=number], select { width:100%; font:inherit; color:var(--text); background:var(--tile); border:1px solid var(--border); border-radius:8px; padding:10px 12px; min-height:42px; }
+  .check { display:flex; gap:8px; align-items:center; color:var(--text); font-size:14px; margin-top:12px; }
+  .check input { width:20px; height:20px; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+  .msg { font-size:13px; margin:10px 0 0; min-height:1em; }
+  .msg.err { color:var(--error); } .msg.ok { color:var(--ok); }
+  .hidden-el { display:none !important; }
+  @media (max-width:420px) { .two { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>SwannTV setup</h1>
+  <span id="status">Connecting…</span>
+</header>
+<main>
+
+  <section id="pair-section" class="hidden-el" aria-labelledby="pair-title">
+    <h2 id="pair-title">Connect to the TV</h2>
+    <p class="sub">On the TV, open Settings → Phone setup and type the 6-digit code shown there. (Scanning the QR code does this for you.)</p>
+    <label for="pair-code">Code</label>
+    <input id="pair-code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="123456">
+    <p class="msg" id="pair-msg" role="status"></p>
+    <div class="row"><button class="primary" id="pair-btn" type="button">Connect</button></div>
+  </section>
+
+  <div id="app" class="hidden-el" style="display:flex;flex-direction:column;gap:20px">
+  <section id="list-section">
+    <h2>Cameras</h2>
+    <p class="sub" id="count">Changes appear on the TV straight away.</p>
+    <div class="row">
+      <button class="primary" id="add-btn" type="button">Add camera</button>
+      <button id="nvr-btn" type="button">Add from NVR</button>
+    </div>
+    <div id="cameras"></div>
+  </section>
+
+  <section id="form-section" class="hidden-el" aria-labelledby="form-title">
+    <h2 id="form-title">Add camera</h2>
+    <p class="sub">Any camera or recorder with an RTSP stream.</p>
+    <label for="f-name">Name</label>
+    <input id="f-name" type="text" placeholder="Front door" autocomplete="off">
+    <label for="f-main">Main stream (full quality)</label>
+    <input id="f-main" type="text" placeholder="rtsp://192.168.1.20:554/stream1" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <label for="f-sub">Grid stream (low resolution, optional)</label>
+    <input id="f-sub" type="text" placeholder="rtsp://192.168.1.20:554/stream2" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="two">
+      <div><label for="f-user">Username</label><input id="f-user" type="text" autocomplete="off" autocapitalize="off"></div>
+      <div><label for="f-pass">Password</label><input id="f-pass" type="password" autocomplete="new-password"></div>
+    </div>
+    <label for="f-tcp">Connection</label>
+    <select id="f-tcp"><option value="1">TCP (reliable)</option><option value="0">UDP</option></select>
+    <label class="check"><input id="f-enabled" type="checkbox" checked> Show in the grid</label>
+    <p class="msg" id="form-msg" role="status"></p>
+    <div class="row">
+      <button id="test-main" type="button">Test main</button>
+      <button id="test-sub" type="button">Test grid</button>
+      <button class="primary" id="save-btn" type="button">Save</button>
+      <button id="cancel-btn" type="button">Cancel</button>
+      <button class="danger" id="delete-btn" type="button">Delete</button>
+    </div>
+  </section>
+
+  <section id="nvr-section" class="hidden-el" aria-labelledby="nvr-title">
+    <h2 id="nvr-title">Add from NVR</h2>
+    <p class="sub">Enter the recorder once; a camera is created for each channel.</p>
+    <label for="n-preset">Recorder brand</label>
+    <select id="n-preset"></select>
+    <div class="two">
+      <div><label for="n-host">IP address</label><input id="n-host" type="text" placeholder="192.168.1.100" autocomplete="off" inputmode="decimal"></div>
+      <div><label for="n-port">Port</label><input id="n-port" type="number" value="554" min="1" max="65535"></div>
+      <div><label for="n-user">Username</label><input id="n-user" type="text" value="admin" autocomplete="off" autocapitalize="off"></div>
+      <div><label for="n-pass">Password</label><input id="n-pass" type="password" autocomplete="new-password"></div>
+    </div>
+    <label for="n-channels">Number of channels</label>
+    <input id="n-channels" type="number" value="4" min="1" max="16">
+    <label class="check"><input id="n-replace" type="checkbox"> Replace my existing cameras</label>
+    <p class="msg" id="nvr-msg" role="status"></p>
+    <div class="row">
+      <button id="nvr-test" type="button">Test channel 1</button>
+      <button class="primary" id="nvr-create" type="button">Create cameras</button>
+      <button id="nvr-cancel" type="button">Cancel</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Grid layout</h2>
+    <p class="sub">How the cameras are arranged when the TV app opens. At most 9 play at once.</p>
+    <select id="layout" aria-label="Grid layout">
+      <option value="AUTO">Automatic</option><option value="ONE">1</option><option value="FOUR">2×2</option><option value="NINE">3×3</option>
+    </select>
+  </section>
+
+  <section>
+    <h2>Backup</h2>
+    <p class="sub">Save the camera list to this phone, or load one saved earlier.</p>
+    <label class="check"><input id="x-pass" type="checkbox"> Include passwords in the file (keep it private)</label>
+    <div class="row" style="margin-top:10px">
+      <button id="export-btn" type="button">Download backup</button>
+      <button id="import-btn" type="button">Load backup…</button>
+      <input id="import-file" type="file" accept="application/json,.json" class="hidden-el">
+    </div>
+    <label class="check"><input id="i-replace" type="checkbox"> Loading replaces my existing cameras</label>
+    <p class="msg" id="backup-msg" role="status"></p>
+  </section>
+
+  </div>
+</main>
+<script>
+"use strict";
+// Take the key out of the address bar (so it isn't left in history or shared by accident);
+// keep it for this tab only, so a reload still works.
+let token = (() => {
+  let t = new URLSearchParams(location.search).get("t") || "";
+  try {
+    if (t) sessionStorage.setItem("swanntv-t", t); else t = sessionStorage.getItem("swanntv-t") || "";
+  } catch (e) { /* private mode: the key just won't survive a reload */ }
+  try { history.replaceState(null, "", location.pathname); } catch (e) {}
+  return t;
+})();
+const $ = id => document.getElementById(id);
+let state = { cameras: [], max: 16, presets: [], layout: "AUTO" };
+let editing = null; // camera being edited, or {} for a new one
+
+async function api(path, body) {
+  const res = await fetch("/api" + path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "X-Token": token, "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({ error: "The TV sent an unreadable answer." }));
+  if (res.status === 403) showPair(data.error); // key expired (Settings was closed on the TV)
+  if (!res.ok) throw new Error(data.error || ("Error " + res.status));
+  return data;
+}
+
+function setStatus(text, bad) {
+  const s = $("status");
+  s.textContent = text;
+  s.style.color = bad ? "var(--error)" : "var(--quiet)";
+}
+
+function msg(el, text, kind) {
+  el.textContent = text || "";
+  el.className = "msg" + (kind ? " " + kind : "");
+}
+
+function host(url) {
+  return (url || "").replace(/^rtsp:\/\//i, "").replace(/^[^@\/]*@/, "").split("/")[0];
+}
+
+function render() {
+  const list = $("cameras");
+  list.replaceChildren();
+  const full = state.cameras.length >= state.max;
+  $("add-btn").disabled = full;
+  $("nvr-btn").disabled = full;
+  $("count").textContent = state.cameras.length + " of " + state.max + " cameras · changes appear on the TV straight away";
+  if (state.cameras.length === 0) {
+    const p = document.createElement("p");
+    p.className = "sub";
+    p.style.marginTop = "12px";
+    p.textContent = "No cameras yet. Use Add from NVR for a recorder, or Add camera for a single camera.";
+    list.append(p);
+  }
+  state.cameras.forEach((c, i) => {
+    const card = document.createElement("div");
+    card.className = "cam" + (c.enabled ? "" : " hidden");
+    const info = document.createElement("div");
+    info.className = "info";
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = (i + 1) + ". " + c.name + (c.enabled ? "" : " (hidden)");
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = host(c.mainUrl) + " · " + (c.subUrl ? "main + grid stream" : "main only") + " · " + (c.useTcp ? "TCP" : "UDP") + (c.hasPassword ? "" : " · no password");
+    info.append(name, meta);
+    card.append(info,
+      button("↑", "icon", () => move(i, -1), "Move " + c.name + " up", i === 0),
+      button("↓", "icon", () => move(i, 1), "Move " + c.name + " down", i === state.cameras.length - 1),
+      button(c.enabled ? "Hide" : "Show", "", () => save(Object.assign({}, c, { enabled: !c.enabled }))),
+      button("Edit", "", () => openForm(c)));
+    list.append(card);
+  });
+  $("layout").value = state.layout;
+}
+
+function button(text, cls, onClick, label, disabled) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = text;
+  if (cls) b.className = cls;
+  if (label) b.setAttribute("aria-label", label);
+  b.disabled = !!disabled;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+async function refresh() {
+  try {
+    state = await api("/state");
+    if ($("n-preset").options.length === 0) {
+      state.presets.forEach(p => $("n-preset").append(new Option(p.label, p.id)));
+    }
+    render();
+    setStatus("Connected to the TV");
+  } catch (e) {
+    setStatus(e.message, true);
+  }
+}
+
+async function save(camera, msgEl) {
+  try {
+    state = await api("/camera", camera);
+    render();
+    return true;
+  } catch (e) {
+    if (msgEl) msg(msgEl, e.message, "err"); else setStatus(e.message, true);
+    return false;
+  }
+}
+
+async function move(i, delta) {
+  const ids = state.cameras.map(c => c.id);
+  const j = i + delta;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  try { state = await api("/order", { ids }); render(); } catch (e) { setStatus(e.message, true); }
+}
+
+function show(section) {
+  if (section !== "form-section") editing = null; // closing the form resumes live refresh
+  ["form-section", "nvr-section"].forEach(id => $(id).classList.toggle("hidden-el", id !== section));
+  if (section) $(section).scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function openForm(c) {
+  editing = c || {};
+  const isNew = !c;
+  $("form-title").textContent = isNew ? "Add camera" : "Edit " + c.name;
+  $("f-name").value = c ? c.name : "";
+  $("f-main").value = c ? c.mainUrl : "rtsp://";
+  $("f-sub").value = c ? c.subUrl : "";
+  $("f-user").value = c ? c.username : "";
+  $("f-pass").value = "";
+  $("f-pass").placeholder = c && c.hasPassword ? "Saved — leave empty to keep it" : "";
+  $("f-tcp").value = !c || c.useTcp ? "1" : "0";
+  $("f-enabled").checked = !c || c.enabled;
+  $("delete-btn").classList.toggle("hidden-el", isNew);
+  msg($("form-msg"), "");
+  show("form-section");
+  $("f-name").focus();
+}
+
+function formCamera() {
+  const camera = {
+    id: editing && editing.id ? editing.id : "",
+    name: $("f-name").value.trim(),
+    mainUrl: $("f-main").value.trim(),
+    subUrl: $("f-sub").value.trim(),
+    username: $("f-user").value.trim(),
+    useTcp: $("f-tcp").value === "1",
+    enabled: $("f-enabled").checked,
+  };
+  if ($("f-pass").value !== "") camera.password = $("f-pass").value; // empty = keep the saved one
+  return camera;
+}
+
+async function testStream(url, el) {
+  const c = formCamera();
+  msg(el, "Testing…");
+  try {
+    const r = await api("/test", { url, id: c.id, username: c.username, password: c.password, useTcp: c.useTcp });
+    msg(el, r.message, r.ok ? "ok" : "err");
+  } catch (e) { msg(el, e.message, "err"); }
+}
+
+$("add-btn").addEventListener("click", () => openForm(null));
+$("nvr-btn").addEventListener("click", () => { msg($("nvr-msg"), ""); show("nvr-section"); editing = {}; $("n-host").focus(); });
+$("cancel-btn").addEventListener("click", () => show(null));
+$("nvr-cancel").addEventListener("click", () => show(null));
+$("test-main").addEventListener("click", () => testStream($("f-main").value.trim(), $("form-msg")));
+$("test-sub").addEventListener("click", () => {
+  const url = $("f-sub").value.trim();
+  if (!url) { msg($("form-msg"), "There's no grid stream to test.", "err"); return; }
+  testStream(url, $("form-msg"));
+});
+$("save-btn").addEventListener("click", async () => {
+  if (await save(formCamera(), $("form-msg"))) show(null);
+});
+$("delete-btn").addEventListener("click", async () => {
+  if (!editing || !editing.id) return;
+  if (!confirm("Delete " + editing.name + "?")) return;
+  try { state = await api("/delete", { id: editing.id }); render(); show(null); }
+  catch (e) { msg($("form-msg"), e.message, "err"); }
+});
+
+function nvrBody() {
+  return {
+    preset: $("n-preset").value,
+    host: $("n-host").value.trim(),
+    port: $("n-port").value.trim(),
+    username: $("n-user").value.trim(),
+    password: $("n-pass").value,
+    channels: parseInt($("n-channels").value, 10) || 0,
+    replace: $("n-replace").checked,
+  };
+}
+$("nvr-test").addEventListener("click", async () => {
+  const b = nvrBody();
+  const preset = b.preset;
+  const paths = { SWANN: "/rtsp/streaming?channel=01&subtype=0", HIKVISION: "/Streaming/Channels/101", DAHUA: "/cam/realmonitor?channel=1&subtype=0" };
+  if (!b.host) { msg($("nvr-msg"), "Enter the recorder's IP address.", "err"); return; }
+  msg($("nvr-msg"), "Testing channel 1…");
+  try {
+    const r = await api("/test", { url: "rtsp://" + b.host + ":" + (b.port || "554") + paths[preset], username: b.username, password: b.password, useTcp: true });
+    msg($("nvr-msg"), "Channel 1: " + r.message, r.ok ? "ok" : "err");
+  } catch (e) { msg($("nvr-msg"), e.message, "err"); }
+});
+$("nvr-create").addEventListener("click", async () => {
+  const b = nvrBody();
+  if (b.replace && state.cameras.length > 0 && !confirm("Replace your " + state.cameras.length + " existing camera(s)?")) return;
+  try { state = await api("/nvr", b); render(); show(null); setStatus("Cameras created"); }
+  catch (e) { msg($("nvr-msg"), e.message, "err"); }
+});
+
+$("layout").addEventListener("change", async e => {
+  try { state = await api("/layout", { layout: e.target.value }); render(); } catch (err) { setStatus(err.message, true); }
+});
+
+$("export-btn").addEventListener("click", async () => {
+  try {
+    const res = await fetch("/api/export" + ($("x-pass").checked ? "?passwords=1" : ""), { headers: { "X-Token": token } });
+    if (!res.ok) throw new Error("The TV refused the download (" + res.status + ")");
+    const blob = new Blob([await res.text()], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "swanntv-cameras-" + new Date().toISOString().slice(0, 10) + ".json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    msg($("backup-msg"), "Backup saved to this phone.", "ok");
+  } catch (e) { msg($("backup-msg"), e.message, "err"); }
+});
+$("import-btn").addEventListener("click", () => $("import-file").click());
+$("import-file").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    data.replace = $("i-replace").checked;
+    if (data.replace && !confirm("Replace your existing cameras with the ones in this file?")) return;
+    state = await api("/import", data);
+    render();
+    msg($("backup-msg"), "Backup loaded.", "ok");
+  } catch (err) {
+    msg($("backup-msg"), err instanceof SyntaxError ? "That file isn't a SwannTV backup." : err.message, "err");
+  } finally {
+    e.target.value = "";
+  }
+});
+
+function showPair(reason) {
+  token = "";
+  try { sessionStorage.removeItem("swanntv-t"); } catch (e) {}
+  $("app").classList.add("hidden-el");
+  $("pair-section").classList.remove("hidden-el");
+  setStatus("Not connected", true);
+  if (reason) msg($("pair-msg"), reason, "err");
+}
+
+let polling = null;
+function startApp() {
+  $("pair-section").classList.add("hidden-el");
+  $("app").classList.remove("hidden-el");
+  refresh();
+  if (!polling) polling = setInterval(() => { if (token && !editing && document.visibilityState === "visible") refresh(); }, 5000);
+}
+
+async function pair() {
+  const code = $("pair-code").value.replace(/\D/g, "");
+  if (code.length !== 6) { msg($("pair-msg"), "Type the 6 digits shown on the TV.", "err"); return; }
+  $("pair-btn").disabled = true;
+  try {
+    const res = await fetch("/pair", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+    const data = await res.json().catch(() => ({ error: "The TV sent an unreadable answer." }));
+    if (!res.ok || !data.token) throw new Error(data.error || ("Error " + res.status));
+    token = data.token;
+    try { sessionStorage.setItem("swanntv-t", token); } catch (e) {}
+    msg($("pair-msg"), "");
+    startApp();
+  } catch (e) {
+    msg($("pair-msg"), e.message, "err");
+  } finally {
+    $("pair-btn").disabled = false;
+  }
+}
+$("pair-btn").addEventListener("click", pair);
+$("pair-code").addEventListener("keydown", e => { if (e.key === "Enter") pair(); });
+
+if (token) startApp(); else showPair();
+</script>
+</body>
+</html>

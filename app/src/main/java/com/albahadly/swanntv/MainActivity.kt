@@ -1,0 +1,46 @@
+package com.albahadly.swanntv
+
+import android.os.Bundle
+import android.view.WindowManager
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
+import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.darkColorScheme
+import com.albahadly.swanntv.ui.AppController
+import com.albahadly.swanntv.ui.AppRoot
+
+class MainActivity : ComponentActivity() {
+
+    private lateinit var app: AppController
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        AppLog.init(this)
+
+        app = AppController(this, lifecycleScope)
+
+        setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                AppRoot(app)
+            }
+        }
+    }
+
+    // Streams run only while the app is on screen (TV off, Home pressed -> everything stops).
+    override fun onStart() {
+        super.onStart()
+        app.onStart()
+    }
+
+    override fun onStop() {
+        app.onStop()
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        app.onDestroy()
+        super.onDestroy()
+    }
+}
