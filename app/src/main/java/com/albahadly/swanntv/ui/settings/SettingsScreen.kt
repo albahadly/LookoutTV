@@ -53,6 +53,11 @@ import com.albahadly.swanntv.data.MotionSensitivity
 import com.albahadly.swanntv.data.MotionMode
 import com.albahadly.swanntv.ui.AppController
 import com.albahadly.swanntv.ui.Palette
+import com.albahadly.swanntv.ui.isSelect
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 
 private enum class Pane(val label: String) {
     CAMERAS("Cameras"), PHONE("Phone setup"), LAYOUT("Viewing"), SECURITY("PIN lock"), ABOUT("About")
@@ -148,16 +153,22 @@ fun SettingsScreen(app: AppController) {
                     p.label,
                     selected = p == pane && editing == null && editingGroup == null && !nvrOpen,
                     modifier = Modifier.focusRequester(paneFocus.getValue(p)),
-                ) {
-                    // Pressing OK on a menu item while a form is open closes the form (unsaved
-                    // changes are dropped, as with Back) and shows that section. Only focus
-                    // moving onto the menu leaves a form alone.
-                    editing = null
-                    editingGroup = null
-                    nvrOpen = false
-                    returnToList = false
-                    pane = p
-                }
+                    onFocused = {
+                        // Moving onto the menu shows the section, but never while a form is open:
+                        // focus passes over the menu for a moment when a form opens, and what was
+                        // typed must survive that.
+                        if (editing == null && editingGroup == null && !nvrOpen) pane = p
+                    },
+                    onPressed = {
+                        // OK on a menu item while a form is open closes the form (unsaved changes
+                        // are dropped, as with Back) and shows that section.
+                        editing = null
+                        editingGroup = null
+                        nvrOpen = false
+                        returnToList = false
+                        pane = p
+                    },
+                )
             }
         }
 
@@ -281,7 +292,13 @@ fun SettingsScreen(app: AppController) {
 }
 
 @Composable
-private fun NavItem(label: String, selected: Boolean, modifier: Modifier = Modifier, onSelect: () -> Unit) {
+private fun NavItem(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit,
+    onPressed: () -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
     Box(
         contentAlignment = Alignment.CenterStart,
@@ -290,7 +307,12 @@ private fun NavItem(label: String, selected: Boolean, modifier: Modifier = Modif
             .height(36.dp)
             .onFocusChanged {
                 focused = it.isFocused
-                if (it.isFocused) onSelect() // TV pattern: moving onto a section shows it
+                if (it.isFocused) onFocused() // TV pattern: moving onto a section shows it
+            }
+            .onKeyEvent {
+                if (it.type == KeyEventType.KeyUp && it.key.isSelect()) {
+                    onPressed(); true
+                } else false
             }
             .focusable()
             .background(
