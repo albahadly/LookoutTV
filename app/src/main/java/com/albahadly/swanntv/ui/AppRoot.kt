@@ -1,7 +1,6 @@
 package com.albahadly.swanntv.ui
 
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
@@ -14,6 +13,8 @@ import com.albahadly.swanntv.data.AppSettings
 import com.albahadly.swanntv.data.LayoutPreference
 import com.albahadly.swanntv.data.MotionMode
 import com.albahadly.swanntv.data.SettingsStore
+import com.albahadly.swanntv.floating.FloatingCamera
+import com.albahadly.swanntv.floating.FloatingCameraService
 import com.albahadly.swanntv.model.CameraRepository
 import com.albahadly.swanntv.playback.CameraTester
 import com.albahadly.swanntv.playback.PlaybackManager
@@ -34,7 +35,7 @@ enum class Screen { VIEWER, PIN, SETTINGS }
 class AppController(context: Context, private val scope: CoroutineScope) {
 
     private val store = SettingsStore(context)
-    private val pipSupported = context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+    private val appContext = context.applicationContext
     val manager = PlaybackManager(context)
     val tester = CameraTester(context)
 
@@ -138,6 +139,9 @@ class AppController(context: Context, private val scope: CoroutineScope) {
     }
 
     fun onStart() {
+        // Back in the app: close the floating window first; its decoder must be free before
+        // the grid (maybe a 4K tile) starts.
+        if (FloatingCamera.hide()) FloatingCameraService.stop(appContext)
         started = true
         when (screen) {
             Screen.VIEWER -> viewer.resume()
@@ -146,30 +150,21 @@ class AppController(context: Context, private val scope: CoroutineScope) {
         }
     }
 
-    /** Home pressed: should the app shrink to a picture-in-picture window? */
     /**
-     * Whether Home should shrink the app to a picture-in-picture window. Reads only Compose
-     * state, so the activity can follow it (Android 12+ enters the window by itself on Home).
+     * Home pressed while watching: if the floating window is on and allowed, keep the camera
+     * playing in a small window over other apps. Everything else stops first, so the floating
+     * stream never overlaps another decoder (the 4K one fails on this TV if it does).
      */
-    // Not gated on pipSupported: some TVs (the TCL 55C6L) don't declare the feature, yet may
-    // still allow it. Trying costs nothing; a refusal is caught and logged.
-    fun pipEligible(): Boolean =
-        settings.pictureInPicture && screen == Screen.VIEWER &&
-            viewer.cameras.any { it.subUrl != it.mainUrl }
-
-    fun canEnterPip(): Boolean = started && pipEligible()
-
-    /** For the log when Home is pressed: why picture-in-picture did or didn't start. */
-    fun pipReport(): String = "supported=$pipSupported setting=${settings.pictureInPicture} screen=$screen " +
-        "started=$started cameras=${viewer.cameras.size}"
-
-    fun enterPip(): Boolean = viewer.enterPip()
-
-    val inPip: Boolean get() = viewer.pipCamera != null
-
-    fun exitPip() = viewer.exitPip()
-
-    fun cancelPip() = viewer.cancelPip()
+    fun onHomePressed() {
+        val allowed = FloatingCamera.canShow(appContext)
+        AppLog.i("home pressed: floating window setting=${settings.pictureInPicture} permission=$allowed screen=$screen")
+        if (!settings.pictureInPicture || !allowed || screen != Screen.VIEWER || !started) return
+        val camera = viewer.floatingCandidate() ?: return
+        viewer.pause() // releases every stream now (the 4K one included)
+        if (FloatingCamera.show(appContext, camera, manager.lastPictures[camera.index])) {
+            FloatingCameraService.start(appContext)
+        }
+    }
 
     fun onStop() {
         started = false
@@ -181,6 +176,7 @@ class AppController(context: Context, private val scope: CoroutineScope) {
     }
 
     fun onDestroy() {
+        if (FloatingCamera.hide()) FloatingCameraService.stop(appContext)
         stopPhoneSetup()
         manager.releaseAll()
     }
@@ -215,11 +211,7 @@ class AppController(context: Context, private val scope: CoroutineScope) {
 @Composable
 fun AppRoot(app: AppController) {
     when (app.screen) {
-        Screen.VIEWER -> {
-            val pipCamera = app.viewer.pipCamera
-            if (pipCamera != null) PipView(app.viewer, pipCamera)
-            else ViewerScreen(app.viewer, onOpenSettings = app::openSettings)
-        }
+        Screen.VIEWER -> ViewerScreen(app.viewer, onOpenSettings = app::openSettings)
         Screen.PIN -> {
             BackHandler { app.closeSettings() }
             PinPad(

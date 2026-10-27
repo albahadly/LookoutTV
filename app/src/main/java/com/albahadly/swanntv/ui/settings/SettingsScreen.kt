@@ -41,6 +41,8 @@ import com.albahadly.swanntv.BuildConfig
 import com.albahadly.swanntv.data.AppSettings
 import com.albahadly.swanntv.data.CameraConfig
 import com.albahadly.swanntv.data.LayoutPreference
+import com.albahadly.swanntv.floating.FloatingCamera
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import com.albahadly.swanntv.data.MotionSensitivity
@@ -343,6 +345,7 @@ private fun summary(camera: CameraConfig): String {
 
 @Composable
 private fun ViewingPane(settings: AppSettings, onChange: (AppSettings) -> Unit) {
+    val context = LocalContext.current
     Column(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 16.dp),
@@ -386,13 +389,20 @@ private fun ViewingPane(settings: AppSettings, onChange: (AppSettings) -> Unit) 
         ) { onChange(settings.copy(tourSeconds = it)) }
 
         Spacer(Modifier.height(8.dp))
-        SectionTitle("Picture-in-picture", "Keep watching in a small window while you use the TV")
+        SectionTitle("Floating camera window", "Keep a camera playing in a corner while you use other apps")
+        val canFloat = remember(settings) { FloatingCamera.canShow(context) }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            TvSwitch(settings.pictureInPicture, "Picture-in-picture") { onChange(settings.copy(pictureInPicture = it)) }
+            TvSwitch(settings.pictureInPicture, "Floating camera window") { onChange(settings.copy(pictureInPicture = it)) }
             Text(if (settings.pictureInPicture) "On" else "Off", fontSize = 12.sp, color = Palette.Text)
         }
-        Hint("Press Home while watching: the camera you were on (or the selected one) keeps playing in a corner on its light grid stream, without sound.")
-        Hint("Off by default: on this TV a 4K video in another app can fail while the corner window plays. Close the window if that happens.", Palette.Warning)
+        Hint("Press Home while watching: the camera you were on (or the selected one) keeps playing in the corner, without sound. Open SwannTV again to close it.")
+        if (canFloat) {
+            Hint("Permission to show over other apps: granted.", Palette.Text)
+        } else {
+            Hint("Needs a one-time permission this TV has no menu for. On the computer, in Android Studio's Terminal, run:", Palette.Warning)
+            Text("adb shell appops set com.albahadly.swanntv SYSTEM_ALERT_WINDOW allow", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Palette.TextBright)
+        }
+        Hint("While it plays, 4K video in another app may fail on this TV: open SwannTV to close the window if that happens.")
     }
 }
 

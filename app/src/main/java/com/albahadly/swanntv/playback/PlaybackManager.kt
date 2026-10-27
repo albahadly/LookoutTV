@@ -88,9 +88,6 @@ class PlaybackManager(private val context: Context) {
         private set
     var fallback: StreamPlayer? = null
         private set
-    /** The picture-in-picture window's stream. */
-    var pip: StreamPlayer? = null
-        private set
 
     private var running = false
     private var ticks = 0
@@ -250,25 +247,6 @@ class PlaybackManager(private val context: Context) {
         fallback = newPlayer(camera.subUrl, "${camera.name} fallback", camera.useTcp, withAudio = true).also { it.start(view) }
     }
 
-    /** Picture-in-picture: the camera's light grid stream, no sound. */
-    fun startPip(camera: Camera, view: SurfaceView): StreamPlayer {
-        stopPip()
-        return newPlayer(camera.subUrl, "${camera.name} pip", camera.useTcp).also {
-            it.start(view)
-            pip = it
-        }
-    }
-
-    fun stopPip() {
-        pip?.let { releaseLater(it) }
-        pip = null
-    }
-
-    fun stopPipNow() {
-        pip?.let { releaseNow(it) }
-        pip = null
-    }
-
     fun stopFallback() {
         fallback?.let { releaseLater(it) }
         fallback = null
@@ -315,7 +293,6 @@ class PlaybackManager(private val context: Context) {
         fullQuality.clear()
         main = null
         fallback = null
-        pip = null
         alive.toList().forEach { releaseNow(it) }
         AppLog.i("all streams stopped")
     }
@@ -353,7 +330,6 @@ class PlaybackManager(private val context: Context) {
         val inUse = HashSet<StreamPlayer>(tiles.values).apply {
             main?.let { add(it) }
             fallback?.let { add(it) }
-            pip?.let { add(it) }
         }
         val orphans = alive.filter { it !in inUse && it !in pendingRelease }
         if (orphans.isNotEmpty()) {
@@ -386,7 +362,6 @@ class PlaybackManager(private val context: Context) {
         motion.entries.removeAll { now - it.value > MOTION_SHOW_MS }
         main?.tick()
         fallback?.tick()
-        pip?.tick()
         if (ticks % SUMMARY_EVERY_TICKS == 0) {
             AppLog.i("streams alive: ${alive.size} (tiles ${tiles.size}, main ${if (main != null) 1 else 0}, " +
                 "fallback ${if (fallback != null) 1 else 0})")

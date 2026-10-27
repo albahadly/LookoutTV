@@ -107,10 +107,6 @@ class ViewerState(
     private var motionCooldownUntil = 0L
     private var lastKeyAt = 0L
 
-    /** Camera playing in the picture-in-picture window, or null. */
-    var pipCamera by mutableStateOf<Camera?>(null)
-        private set
-
     private var overlayJob: Job? = null
     /** The full-screen 4K surface, once the screen has created it. */
     private var mainView: TextureView? = null
@@ -320,7 +316,6 @@ class ViewerState(
     fun pause() {
         close()
         paused = true
-        pipCamera = null
         manager.stopAll()
     }
 
@@ -432,7 +427,7 @@ class ViewerState(
     // ------------------------------------------------------------------ motion
 
     private fun onMotion(cameraIndex: Int) {
-        if (!motionOpens || isFullscreen || paused || touring || pipCamera != null) return
+        if (!motionOpens || isFullscreen || paused || touring) return
         val now = SystemClock.elapsedRealtime()
         // Not while someone is using the remote, nor straight after a motion camera was closed.
         if (now < motionCooldownUntil || now - lastKeyAt < 10_000) return
@@ -455,44 +450,16 @@ class ViewerState(
         autoCloseJob?.cancel()
     }
 
-    // ------------------------------------------------------------------ picture-in-picture
+    // ------------------------------------------------------------------ floating window
 
     /**
-     * Home pressed: show one camera in the small window, on its light grid stream without
-     * sound. Everything else stops first (the 4K stream must never overlap another decoder).
+     * The camera for the floating window when Home is pressed: the one full screen, else the
+     * selected tile, else the first. Only cameras with a light grid stream: a 4K picture
+     * floating over other apps could stop their video on this TV.
      */
-    fun enterPip(): Boolean {
-        if (pipCamera != null) return true
-        val camera = fullCamera ?: cameras.firstOrNull { it.index == focusedIndex } ?: cameras.firstOrNull() ?: return false
-        if (camera.subUrl == camera.mainUrl) {
-            // No light stream: a 4K picture in the corner could stop other apps' video.
-            AppLog.i("picture-in-picture skipped: ${camera.name} has no grid stream")
-            return false
-        }
-        AppLog.i("picture-in-picture: ${camera.name}")
-        close()
-        paused = true
-        manager.stopAll()
-        manager.resume() // keeps the health checks running for the small window
-        pipCamera = camera
-        return true
-    }
-
-    /** The TV refused the small window: stay stopped, as if Home had been pressed without it. */
-    fun cancelPip() {
-        pipCamera = null
-        manager.stopAll()
-    }
-
-    /** Back from the small window to the full app. */
-    fun exitPip() {
-        val camera = pipCamera ?: return
-        AppLog.i("picture-in-picture closed, back to the grid")
-        manager.stopPipNow() // its decoder must be closed before the grid (maybe 4K) starts
-        pipCamera = null
-        page = (camera.index / layout.cells).coerceIn(0, pageCount - 1)
-        focusTarget = camera.index
-        resume()
+    fun floatingCandidate(): Camera? {
+        val camera = fullCamera ?: cameras.firstOrNull { it.index == focusedIndex } ?: cameras.firstOrNull()
+        return camera?.takeIf { it.subUrl != it.mainUrl } ?: cameras.firstOrNull { it.subUrl != it.mainUrl }
     }
 
     fun resume() {
