@@ -462,6 +462,7 @@ class ViewerState(
      * sound. Everything else stops first (the 4K stream must never overlap another decoder).
      */
     fun enterPip(): Boolean {
+        if (pipCamera != null) return true
         val camera = fullCamera ?: cameras.firstOrNull { it.index == focusedIndex } ?: cameras.firstOrNull() ?: return false
         if (camera.subUrl == camera.mainUrl) {
             // No light stream: a 4K picture in the corner could stop other apps' video.

@@ -147,8 +147,19 @@ class AppController(context: Context, private val scope: CoroutineScope) {
     }
 
     /** Home pressed: should the app shrink to a picture-in-picture window? */
-    fun canEnterPip(): Boolean =
-        pipSupported && started && settings.pictureInPicture && screen == Screen.VIEWER && viewer.cameras.isNotEmpty()
+    /**
+     * Whether Home should shrink the app to a picture-in-picture window. Reads only Compose
+     * state, so the activity can follow it (Android 12+ enters the window by itself on Home).
+     */
+    fun pipEligible(): Boolean =
+        pipSupported && settings.pictureInPicture && screen == Screen.VIEWER &&
+            viewer.cameras.any { it.subUrl != it.mainUrl }
+
+    fun canEnterPip(): Boolean = started && pipEligible()
+
+    /** For the log when Home is pressed: why picture-in-picture did or didn't start. */
+    fun pipReport(): String = "supported=$pipSupported setting=${settings.pictureInPicture} screen=$screen " +
+        "started=$started cameras=${viewer.cameras.size}"
 
     fun enterPip(): Boolean = viewer.enterPip()
 
