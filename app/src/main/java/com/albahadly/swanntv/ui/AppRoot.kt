@@ -151,8 +151,10 @@ class AppController(context: Context, private val scope: CoroutineScope) {
      * Whether Home should shrink the app to a picture-in-picture window. Reads only Compose
      * state, so the activity can follow it (Android 12+ enters the window by itself on Home).
      */
+    // Not gated on pipSupported: some TVs (the TCL 55C6L) don't declare the feature, yet may
+    // still allow it. Trying costs nothing; a refusal is caught and logged.
     fun pipEligible(): Boolean =
-        pipSupported && settings.pictureInPicture && screen == Screen.VIEWER &&
+        settings.pictureInPicture && screen == Screen.VIEWER &&
             viewer.cameras.any { it.subUrl != it.mainUrl }
 
     fun canEnterPip(): Boolean = started && pipEligible()

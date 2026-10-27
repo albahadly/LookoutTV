@@ -71,7 +71,8 @@ class MainActivity : ComponentActivity() {
         if (!app.canEnterPip() || !app.enterPip()) return
         val entered = runCatching {
             enterPictureInPictureMode(pipParams(autoEnter = true))
-        }.getOrDefault(false)
+        }.onFailure { AppLog.w("picture-in-picture not available on this TV: ${it.javaClass.simpleName}: ${it.message}") }
+            .getOrDefault(false)
         if (!entered) {
             // Turned off for this app in Android settings: just stop, as without PiP (no
             // restart of the streams while the app is leaving).
