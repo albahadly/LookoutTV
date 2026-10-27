@@ -72,6 +72,11 @@ class AppController(context: Context, private val scope: CoroutineScope) {
     private var wrongPins = 0
     private var pinLockedUntil = 0L
 
+    /** Cameras whose saved password the TV can't read right now (Settings warns about them). */
+    val unreadablePasswordIds: Set<String> get() = store.unreadablePasswordIds
+    /** Why the last save didn't fully work, or null. */
+    val saveProblem: String? get() = store.saveProblem
+
     fun update(newSettings: AppSettings) {
         settings = newSettings
         store.save(newSettings)
@@ -177,8 +182,13 @@ class AppController(context: Context, private val scope: CoroutineScope) {
         if (screen == Screen.SETTINGS && settings.hasPin) screen = Screen.PIN
     }
 
-    fun onDestroy() {
-        if (FloatingCamera.hide()) FloatingCameraService.stop(appContext)
+    /**
+     * [finishing]: the user closed the app (Back out, or Android replacing the activity),
+     * so the floating window goes too. Otherwise Android only reclaimed the hidden screen to
+     * free memory while the window plays over another app: that must keep going.
+     */
+    fun onDestroy(finishing: Boolean) {
+        if (finishing && FloatingCamera.hide()) FloatingCameraService.stop(appContext)
         stopPhoneSetup()
         manager.releaseAll()
     }

@@ -38,24 +38,27 @@ class CameraTester(private val context: Context) {
     private val handler = Handler(Looper.getMainLooper())
     private var player: ExoPlayer? = null
 
-    /** Tests [url]; [onResult] is called once on the main thread. A new test cancels the last. */
+    /**
+     * Tests [url]; [onResult] is called once on the main thread, and never for a test that
+     * was cancelled (a cancelled player can still report an error while it is released).
+     */
     fun test(url: String, useTcp: Boolean, onResult: (Result) -> Unit) {
         cancel()
         val started = SystemClock.elapsedRealtime()
         var finished = false
-        fun finish(result: Result) {
-            if (finished) return
-            finished = true
-            AppLog.i("camera test: $result")
-            cancel()
-            onResult(result)
-        }
 
         // The video track is "played" by a renderer that throws the data away, so no decoder is
         // opened. (Disabling every track instead crashes Media3's RTSP client: it then sends PLAY
         // without a session.)
         val p = ExoPlayer.Builder(context) { _, _, _, _, _ -> arrayOf<Renderer>(DiscardVideoRenderer()) }.build()
         player = p
+        fun finish(result: Result) {
+            if (finished || player !== p) return // already answered, or cancelled meanwhile
+            finished = true
+            AppLog.i("camera test: $result")
+            cancel()
+            onResult(result)
+        }
         p.addListener(object : Player.Listener {
             override fun onTracksChanged(tracks: Tracks) {
                 if (tracks.groups.isEmpty()) return
@@ -85,6 +88,7 @@ class CameraTester(private val context: Context) {
             RtspMediaSource.Factory()
                 .setForceUseRtpTcp(useTcp)
                 .setTimeoutMs(8_000)
+                .setSocketFactory(RtspSockets.factory) // "Couldn't connect" within 5 s, not minutes
                 .createMediaSource(MediaItem.fromUri(url))
         )
         p.prepare()
@@ -124,20 +128,24 @@ class CameraTester(private val context: Context) {
 
     fun cancel() {
         handler.removeCallbacksAndMessages(null)
-        player?.release()
-        player = null
+        val p = player ?: return
+        player = null // before release(): a late onPlayerError from it must not count
+        p.release()
     }
 
     private fun describe(error: PlaybackException): String {
         val messages = generateSequence<Throwable>(error) { it.cause }.mapNotNull { it.message }.joinToString(" ")
+        // Network codes first; the status-code words are matched whole, so "401" inside a port
+        // number ("port 40412" in a refused-connection message) doesn't count.
         return when {
-            "401" in messages || "nauthorized" in messages -> "Sign-in failed. Check the username and password."
-            "404" in messages || "Not Found" in messages -> "The camera answered but has no stream at that path."
             error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
                 "ECONNREFUSED" in messages || "Connection refused" in messages ->
                 "Couldn't connect. Check the address and port."
-            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+                "timed out" in messages || "ETIMEDOUT" in messages || "unreachable" in messages ->
                 "No answer from that address. Is the camera on this network?"
+            Regex("\\b401\\b|[Uu]nauthorized").containsMatchIn(messages) -> "Sign-in failed. Check the username and password."
+            Regex("\\b404\\b|Not Found").containsMatchIn(messages) -> "The camera answered but has no stream at that path."
             else -> {
                 // Unknown: say what actually went wrong, so it can be looked into.
                 val root = generateSequence<Throwable>(error) { it.cause }.last()

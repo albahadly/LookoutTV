@@ -32,14 +32,17 @@ object AppLog {
     /** Replaces the user:password part of a stream URL with asterisks. */
     fun redact(url: String): String = url.replace(Regex("//[^/@]*@"), "//***@")
 
+    /** Synchronized: the phone-setup server logs from its own threads (SimpleDateFormat isn't thread-safe). */
+    @Synchronized
     private fun write(priority: Int, message: String, error: Throwable?) {
-        Log.println(priority, TAG, redact(message + (error?.let { "\n" + Log.getStackTraceString(it) } ?: "")))
+        val safeMessage = redact(message) // no login ever reaches logcat or the file
+        Log.println(priority, TAG, safeMessage + (error?.let { "\n" + redact(Log.getStackTraceString(it)) } ?: ""))
         val f = file ?: return
         try {
             if (f.length() > MAX_BYTES) f.renameTo(File(f.parentFile, "swanntv-log.old.txt"))
             val level = if (priority == Log.WARN) "W" else "I"
             val cause = error?.let { "  | ${causeChain(it)}" } ?: ""
-            f.appendText("${time.format(Date())} $level $message$cause\n")
+            f.appendText("${time.format(Date())} $level $safeMessage$cause\n")
         } catch (e: Exception) {
             Log.w(TAG, "Could not write log file", e)
         }

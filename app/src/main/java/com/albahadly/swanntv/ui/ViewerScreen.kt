@@ -300,9 +300,6 @@ private fun FullscreenLayer(state: ViewerState) {
             modifier = Modifier.fillMaxSize(),
         )
 
-        if (state.fallbackShowing) {
-            key(camera.index) { FallbackStream(state, camera) }
-        }
       }
 
         // Always visible (not only with the overlay): zoom level and tour countdown.
@@ -327,21 +324,6 @@ private fun FullscreenLayer(state: ViewerState) {
             FullscreenOverlay(state, camera)
         }
     }
-}
-
-/** The camera's sub-stream, shown while its main stream loads or recovers. */
-@Composable
-private fun FallbackStream(state: ViewerState, camera: Camera) {
-    var view by remember { mutableStateOf<TextureView?>(null) }
-    DisposableEffect(view) {
-        val v = view
-        if (v != null) state.manager.startFallback(camera, v)
-        onDispose { if (v != null) state.manager.stopFallback() }
-    }
-    AndroidView(
-        factory = { context -> TextureView(context).also { view = it } },
-        modifier = Modifier.fillMaxSize(),
-    )
 }
 
 @Composable

@@ -35,7 +35,7 @@ Kotlin · Jetpack Compose for TV · Media3 ExoPlayer (RTSP over TCP) · minSdk 2
 
    Typing addresses is easier on a phone: **Settings → Phone setup** shows a QR code. Scan it with a phone on the same Wi-Fi and manage cameras from the phone's browser; the TV updates straight away.
 
-Settings also has the grid layout, a PIN lock for Settings, and reorder / hide / rename for each camera. Passwords are encrypted with a key kept in the TV's secure hardware storage.
+Settings also has the grid layout, a PIN lock for Settings, and reorder / hide / rename for each camera. Passwords are encrypted with an Android Keystore key, which is hardware-backed on most TVs.
 
 Optional: `local.properties` (git-ignored) can pre-fill the camera list on a fresh install, without the password, which is never compiled into the app:
 
@@ -48,28 +48,36 @@ nvr.mainPath=/rtsp/streaming?channel={ch}&subtype=0
 nvr.subPath=/rtsp/streaming?channel={ch}&subtype=1
 ```
 
-The `probe` module still reads `nvr.password` from `local.properties`, since it has no Settings screen.
+The `probe` module still reads `nvr.password` from `local.properties`, since it has no Settings screen. That password (and the NVR address) is compiled into the probe APK as plain text, so never share a probe build. Its camera list is fixed to four Swann channels in `ProbeConfig.kt`; edit that to probe another recorder.
+
+Release builds are signed with the debug key, so installing a build from another computer needs the old one uninstalled first.
 
 ## Phone setup and security
 
 The phone page is served by the TV itself, only while Settings is open on screen:
 
-- A new one-time key is made each time Settings opens, carried in the QR code; leaving Settings (or 15 minutes without use) stops the server and the key stops working.
+- It listens on port 8765 (or the next free one up to 8775). A new one-time key is made each time Settings opens, carried in the QR code; leaving Settings (or 15 minutes without use) stops the server and the key stops working.
+- No QR scanner? Type the address shown on the TV and enter the 6-digit code next to it. Five wrong codes switch the code off until Settings is reopened.
 - Only devices with home-network (private) addresses are answered, and the page must be opened by the TV's own address.
-- Saved passwords are never sent to the phone, and a saved password is only reused for the address it was saved with.
-- The connection is plain HTTP on your home network (a TV can't get a trusted certificate for a local address). Anyone who can watch your Wi-Fi traffic while you use it could see what you type, so use it on your own trusted network. Backups that include passwords are plain text: keep them private.
+- Saved passwords are never shown on the phone; a saved password is only reused for the address it was saved with. Only a backup you tick **Include passwords** for contains them, as plain text.
+- The connection is plain HTTP on your home network (a TV can't get a trusted certificate for a local address). Anyone who can watch your Wi-Fi traffic while you use it could see what you type, so use it on your own trusted network.
 
 ## Remote
 
 | Where | Key | Does |
 | --- | --- | --- |
-| Grid | ◀ ▲ ▼ ▶ | Move between tiles; past the edge changes page |
+| Grid | ◀ ▲ ▼ ▶ | Move between tiles; ◀ ▶ past the left or right edge changes page |
 | Grid | OK | Open camera full screen |
 | Grid | 1–9 | Open that tile directly |
-| Grid | CH + / CH − | Next / previous page |
-| Grid | ▲ to the header | Layout and Settings |
+| Grid | CH + / CH − (also Page Up/Down, Next/Previous) | Next / previous page |
+| Grid | ▲ to the header | Layout, Tour and Settings |
+| Anywhere | ▶ (Play) | Start / stop the camera tour |
 | Full screen | ◀ ▶ | Previous / next camera (all cameras, across pages) |
-| Full screen | OK or Back | Back to the grid |
+| Full screen | ▲ | Zoom 2×; then OK zooms to 3×, 4× and back |
+| Full screen, zoomed | ◀ ▲ ▼ ▶ | Move around the picture |
+| Full screen | OK | Back to the grid (when not zoomed) |
+| Full screen | Back | Zoom out, or back to the grid |
+| Full screen | Home | Floating camera window (if turned on and the camera has a grid stream) |
 
 ## Camera settings that matter
 

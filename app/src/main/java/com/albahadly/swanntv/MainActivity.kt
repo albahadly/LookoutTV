@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        app.onDestroy()
+        app.onDestroy(isFinishing)
         super.onDestroy()
     }
 }

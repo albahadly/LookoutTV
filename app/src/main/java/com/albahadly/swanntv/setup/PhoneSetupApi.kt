@@ -2,7 +2,6 @@ package com.albahadly.swanntv.setup
 
 import android.os.Handler
 import android.os.Looper
-import com.albahadly.swanntv.AppLog
 import com.albahadly.swanntv.data.AppSettings
 import com.albahadly.swanntv.data.CameraConfig
 import com.albahadly.swanntv.data.LayoutPreference
@@ -53,6 +52,9 @@ class PhoneSetupApi(
         }
     } catch (e: Rejected) {
         error(e.message ?: "Refused", e.status)
+    } catch (e: InterruptedException) {
+        // The server was stopped (Settings closed) while this request waited.
+        error("Settings was closed on the TV. Scan the QR code again.", 403)
     } catch (e: Exception) {
         error("That request wasn't understood: ${e.message ?: e.javaClass.simpleName}", 400)
     }
@@ -121,7 +123,7 @@ class PhoneSetupApi(
         val port = json.str("port").trim().ifEmpty { "554" }
         val channels = json.optInt("channels", 0)
         val replace = json.optBoolean("replace", false)
-        if (!HOST.matches(host)) return error("Enter the recorder's IP address (like 192.168.1.100).")
+        if (!SettingsStore.isValidHost(host)) return error("Enter the recorder's IP address (like 192.168.1.100).")
         if (port.toIntOrNull() !in 1..65535) return error("The port should be a number, usually 554.")
         if (channels !in 1..AppSettings.MAX_CAMERAS) return error("Choose 1 to 16 channels.")
         return mutate(token) {
@@ -164,6 +166,10 @@ class PhoneSetupApi(
             val latch = CountDownLatch(1)
             var result: CameraTester.Result = CameraTester.Result.Failed("No answer within 10 seconds.")
             main.post {
+                if (!isCurrentSession(token)) { // Settings closed meanwhile: don't start a stream now
+                    latch.countDown()
+                    return@post
+                }
                 tester.test(SettingsStore.withCredentials(url, username, password), json.optBoolean("useTcp", true)) {
                     result = it
                     latch.countDown()
@@ -227,8 +233,7 @@ class PhoneSetupApi(
         return stateJson(settings())
     }
 
-    private fun endpointsOf(c: CameraConfig): Set<String?> =
-        setOfNotNull(SettingsStore.endpoint(c.mainUrl), c.subUrl.takeIf { it.isNotEmpty() }?.let { SettingsStore.endpoint(it) })
+    private fun endpointsOf(c: CameraConfig): Set<String?> = SettingsStore.endpointsOf(c)
 
     /** True if the new addresses point only at hosts the camera was saved with. */
     private fun sameEndpoints(existing: CameraConfig, mainUrl: String, subUrl: String): Boolean {
@@ -246,8 +251,9 @@ class PhoneSetupApi(
                 put(JSONObject()
                     .put("id", c.id)
                     .put("name", c.name)
-                    .put("mainUrl", AppLog.redact(c.mainUrl)) // never a login, even an old typed-in one
-                    .put("subUrl", AppLog.redact(c.subUrl))
+                    // Without any login (stripped, not masked: the page sends these back on save).
+                    .put("mainUrl", SettingsStore.splitCredentials(c.mainUrl).first)
+                    .put("subUrl", SettingsStore.splitCredentials(c.subUrl).first)
                     .put("username", c.username)
                     .put("hasPassword", c.password.isNotEmpty()) // never the password itself
                     .put("useTcp", c.useTcp)
@@ -264,8 +270,8 @@ class PhoneSetupApi(
             s.cameras.forEach { c ->
                 put(JSONObject()
                     .put("name", c.name)
-                    .put("mainUrl", if (withPasswords) c.mainUrl else AppLog.redact(c.mainUrl))
-                    .put("subUrl", if (withPasswords) c.subUrl else AppLog.redact(c.subUrl))
+                    .put("mainUrl", SettingsStore.splitCredentials(c.mainUrl).first)
+                    .put("subUrl", SettingsStore.splitCredentials(c.subUrl).first)
                     .put("username", c.username)
                     .apply { if (withPasswords) put("password", c.password) }
                     .put("useTcp", c.useTcp)
@@ -321,8 +327,4 @@ class PhoneSetupApi(
         return value!!.getOrThrow()
     }
 
-    private companion object {
-        /** A host name or IPv4 address: no paths, logins or spaces can sneak into saved URLs. */
-        val HOST = Regex("^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
-    }
 }

@@ -57,7 +57,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Sideloaded with ADB for now; replace with a real signing config before sharing.
             signingConfig = signingConfigs.getByName("debug")
         }

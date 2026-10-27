@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -57,6 +58,16 @@ fun PinPad(
     LaunchedEffect(Unit) {
         withFrameNanos { }
         runCatching { keypadFocus.requestFocus() }
+    }
+    // While locked, the "wait N s" text counts down by itself instead of waiting for a key.
+    LaunchedEffect(message) {
+        if (lockMessage() == null) return@LaunchedEffect
+        while (true) {
+            delay(1_000)
+            val lock = lockMessage()
+            message = lock ?: break
+        }
+        message = null
     }
 
     fun complete(pin: String) {

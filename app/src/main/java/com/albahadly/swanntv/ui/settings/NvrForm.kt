@@ -79,6 +79,7 @@ fun NvrForm(
 
     fun check(): String? = when {
         host.isBlank() -> "Enter the recorder's IP address."
+        !SettingsStore.isValidHost(host) -> "Enter just the recorder's IP address or name, like 192.168.1.100 (no rtsp://, login, port or path)."
         port.toIntOrNull() !in 1..65535 -> "The port should be a number, usually 554."
         channels > room -> "Only $room more camera${if (room == 1) "" else "s"} fit (16 at most). Choose Replace or fewer channels."
         else -> null

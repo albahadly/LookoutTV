@@ -1,4 +1,4 @@
-# Machine-specific and secrets (NVR password lives in local.properties)
+# Machine-specific and secrets (local.properties can hold the probe's NVR password)
 local.properties
 *.keystore
 *.jks
@@ -18,6 +18,9 @@ captures/
 probe-log.txt
 apk/
 *.apk
+app/release/
+probe/release/
+*.hprof
 
 # App logs pulled from the TV
 swanntv-log*.txt

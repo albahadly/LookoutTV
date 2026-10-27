@@ -27,6 +27,10 @@ object SecretBox {
 
     @Volatile private var cachedKey: SecretKey? = null
 
+    /** Set while the Keystore refuses to work (shown in Settings); null when it works. */
+    @Volatile var problem: String? = null
+        private set
+
     /** Ciphertext for [plain], "" for "", or null if the Keystore failed (keep the old value). */
     fun encrypt(plain: String): String? {
         if (plain.isEmpty()) return ""
@@ -34,9 +38,11 @@ object SecretBox {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, key())
             val sealed = cipher.iv + cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
+            problem = null
             Base64.encodeToString(sealed, Base64.NO_WRAP)
         } catch (e: Exception) {
             AppLog.w("could not encrypt a secret (Keystore problem)", e)
+            problem = "The TV's secure storage isn't working, so passwords can't be saved right now. Restart the TV and try again."
             null
         }
     }
@@ -52,6 +58,7 @@ object SecretBox {
         } catch (e: Exception) {
             val permanent = e is AEADBadTagException || e is KeyPermanentlyInvalidatedException
             AppLog.w("could not decrypt a secret" + if (permanent) " (key changed; re-enter it)" else " (will retry)", e)
+            if (!permanent) problem = "The TV's secure storage isn't answering, so saved passwords can't be read right now. Restart the TV."
             null
         }
     }
@@ -59,14 +66,10 @@ object SecretBox {
     private fun key(): SecretKey {
         cachedKey?.let { return it }
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        val existing = try {
-            (store.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
-        } catch (e: UnrecoverableKeyException) {
-            // A broken entry: start a fresh key (old secrets are lost and must be re-entered).
-            AppLog.w("Keystore entry unusable, creating a new key", e)
-            store.deleteEntry(ALIAS)
-            null
-        }
+        // An UnrecoverableKeyException here is left to the caller (it returns null and keeps
+        // the old ciphertext). The Keystore can refuse briefly after boot or an update; deleting
+        // the key on that would make every saved password unreadable for good.
+        val existing = (store.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
         val key = existing ?: KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
             init(
                 KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)

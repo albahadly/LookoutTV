@@ -30,7 +30,7 @@ enum class GridLayout(val cells: Int, val columns: Int, val label: String) {
  *  1. OK grows the tile itself to full screen; its sub-stream never stops (picture < 110 ms).
  *  2. After that frame is drawn the 4K main stream starts underneath and fades in on its first
  *     frame (~400 ms); only then is the tile's stream released.
- * Left/right switches camera on the same main player; a fallback sub-stream shows meanwhile.
+ * Left/right switches camera on the same main player; the camera's last picture shows meanwhile.
  */
 @Stable
 class ViewerState(
@@ -70,8 +70,6 @@ class ViewerState(
      * tile simply stays on screen (no second stream, no quality change) until left/right.
      */
     var tileIsFullQuality by mutableStateOf(false)
-        private set
-    var fallbackShowing by mutableStateOf(false)
         private set
     var overlayVisible by mutableStateOf(false)
         private set
@@ -174,7 +172,6 @@ class ViewerState(
         expandedPlaying = true
         tileIsFullQuality = false
         mainShowing = false
-        fallbackShowing = false
         resetZoom()
         showOverlay()
     }
@@ -229,7 +226,6 @@ class ViewerState(
         expandedPlaying = false
         tileIsFullQuality = false
         mainShowing = false
-        fallbackShowing = false
         resetZoom()
         val main = manager.main
         val view = mainView
@@ -252,7 +248,6 @@ class ViewerState(
         manager.captureMainPicture(index)
         // Stop the full-screen streams directly rather than waiting for the screen to recompose.
         manager.stopMain()
-        manager.stopFallback()
         mainView = null
         mainStartPending = false
         mainStartToken++
@@ -261,7 +256,6 @@ class ViewerState(
         expandedPlaying = false
         tileIsFullQuality = false
         mainShowing = false
-        fallbackShowing = false
         overlayJob?.cancel()
         overlayVisible = false
         // After left/right the camera may be on another page: go there, then focus it.
@@ -276,28 +270,22 @@ class ViewerState(
         openedAt = 0
         mainShowing = true
         expandedPlaying = false // frees the tile's decoder (released after the frame)
-        fallbackShowing = false
     }
 
     /**
-     * The main stream failed (it retries by itself).
-     *  - Decoder error: the TV ran out of decoder capacity, so free every other decoder (the
-     *    enlarged tile and any fallback) and let the main stream retry alone; the tile's last
-     *    picture stays on screen meanwhile.
-     *  - Other errors (network): keep a moving picture with the fallback sub-stream (the 4K
-     *    decoder isn't running then, so the two don't compete).
+     * The main stream failed (it retries by itself). While it retries, the camera's last
+     * picture stays on screen. Nothing else may play meanwhile: a second stream (even a small
+     * one) open while the 4K decoder restarts makes that restart fail on this TV, and
+     * repeated failures jam the decoder until a power cycle.
      */
     private fun onMainFailed() {
         val error = manager.main?.lastError.orEmpty()
         AppLog.w("main stream failed: $error (tile still playing: $expandedPlaying)")
         if (!isFullscreen) return
         mainShowing = false
-        if (error.startsWith("DECOD")) {
+        if (expandedPlaying) {
             expandedIndex?.let { manager.releaseTileNow(it) }
             expandedPlaying = false
-            fallbackShowing = false
-        } else if (!expandedPlaying) {
-            fallbackShowing = true
         }
     }
 

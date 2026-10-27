@@ -49,7 +49,14 @@ class FloatingCameraService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
-        }.onFailure { AppLog.w("floating window could not stay in the foreground: ${it.message}") }
+        }.onFailure {
+            // Without foreground status Android kills the app within seconds: better to close
+            // the window ourselves than to crash with it open.
+            AppLog.w("floating window could not stay in the foreground: ${it.message}")
+            FloatingCamera.hide()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (!FloatingCamera.isShowing) stopSelf()
         return START_NOT_STICKY
     }

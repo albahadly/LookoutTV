@@ -71,7 +71,9 @@ class PhoneSetupServer(
         const val MAX_HEADER_BYTES = 16 * 1024
         const val MAX_BODY_BYTES = 256 * 1024
         const val REQUEST_DEADLINE_MS = 5_000L
-        const val MAX_PER_CLIENT = 2
+        // Browsers open spare connections ahead of time (plus the favicon request), so a phone
+        // can hold 3-4 sockets at once; the pool and queue bound the total anyway.
+        const val MAX_PER_CLIENT = 6
         const val IDLE_STOP_MS = 15 * 60_000L
     }
 
@@ -128,7 +130,8 @@ class PhoneSetupServer(
     fun start(): Boolean {
         if (isRunning) return true
         token = newToken()
-        pairCode = "%06d".format(SecureRandom().nextInt(1_000_000))
+        // ASCII digits whatever the TV's language (String.format would use the locale's digits).
+        pairCode = SecureRandom().nextInt(1_000_000).toString().padStart(6, '0')
         wrongCodes.set(0)
         for (candidate in PORTS) {
             try {
@@ -244,7 +247,7 @@ class PhoneSetupServer(
             if (key != null && !tokenMatches(key)) {
                 return Response.text("This link has expired. Open Settings on the TV and scan the QR code again.", 403)
             }
-            lastUsed = SystemClock.elapsedRealtime()
+            if (key != null) lastUsed = SystemClock.elapsedRealtime() // a stranger loading / must not keep it alive
             val page = context.assets.open("setup.html").use { it.readBytes() }
             return Response(200, "text/html; charset=utf-8", page)
         }
@@ -299,7 +302,8 @@ class PhoneSetupServer(
         val head = ByteArrayOutputStream()
         var last4 = 0
         while (true) {
-            if (head.size() and 0xFF == 0) socket.soTimeout = timeLeft() // re-check now and then
+            val left = timeLeft() // every byte: a client trickling bytes must not hold a worker past the deadline
+            if (head.size() and 0xFF == 0) socket.soTimeout = left
             val b = input.read()
             if (b < 0) return null
             head.write(b)

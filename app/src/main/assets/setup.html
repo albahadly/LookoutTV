@@ -361,6 +361,7 @@ $("layout").addEventListener("change", async e => {
 $("export-btn").addEventListener("click", async () => {
   try {
     const res = await fetch("/api/export" + ($("x-pass").checked ? "?passwords=1" : ""), { headers: { "X-Token": token } });
+    if (res.status === 403) { showPair("Settings was closed on the TV. Connect again."); throw new Error("Not connected to the TV."); }
     if (!res.ok) throw new Error("The TV refused the download (" + res.status + ")");
     const blob = new Blob([await res.text()], { type: "application/json" });
     const a = document.createElement("a");

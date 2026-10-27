@@ -52,6 +52,7 @@ class StreamPlayer(
         const val MAX_BACKOFF_MS = 30_000L
         const val OFFLINE_AFTER_FAILURES = 3
         const val FROZEN_AFTER_TICKS = 5
+        val AUTH_WORDS = Regex("\\b401\\b|[Uu]nauthorized")
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -96,6 +97,8 @@ class StreamPlayer(
     /** The pending reconnect, so a camera switch can cancel just that. */
     private var retryTask: Runnable? = null
 
+    /** Set by a decoder error: the next (re)start must build a new player, never re-prepare. */
+    private var rebuildOnNext = false
     private var awaitingFrame = true
     private var consecutiveFailures = 0
     private var lastRendered = 0
@@ -133,6 +136,11 @@ class StreamPlayer(
         consecutiveFailures = 0
         lastRendered = 0
         frozenTicks = 0
+        if (rebuildOnNext) {
+            // The decoder failed last time: a fresh player, not the same one re-prepared.
+            rebuild()
+            return
+        }
         p.setMediaSource(mediaSource(newUrl))
         p.prepare()
         p.playWhenReady = true
@@ -158,6 +166,7 @@ class StreamPlayer(
         RtspMediaSource.Factory()
             .setForceUseRtpTcp(useTcp)
             .setTimeoutMs(8_000)
+            .setSocketFactory(RtspSockets.factory)
             .createMediaSource(MediaItem.fromUri(streamUrl))
 
     private fun attach(p: ExoPlayer, target: View) {
@@ -176,12 +185,17 @@ class StreamPlayer(
             .build()
         return ExoPlayer.Builder(context, renderers)
             .setLoadControl(loadControl)
+            // release() normally takes ~50 ms; if a decoder is stuck, wait for it rather than
+            // return early and start the next (4K) decoder while this one is still open.
+            .setReleaseTimeoutMs(2_000)
             .build()
             .apply {
                 if (audio) {
+                    // No audio focus handling: a camera must never pause because another sound
+                    // played (ExoPlayer would flip playWhenReady off and never back on).
                     setAudioAttributes(
                         AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
-                        /* handleAudioFocus = */ true,
+                        /* handleAudioFocus = */ false,
                     )
                 } else {
                     // No audio decoder at all: cheaper, and video timing follows the clock.
@@ -229,6 +243,7 @@ class StreamPlayer(
         // Every 4xxx code is a decoder problem, including "resources reclaimed" (another
         // stream took the hardware decoder), which a weak TV chip raises during transitions.
         val decoderProblem = error.errorCode / 1000 == 4
+        if (decoderProblem) rebuildOnNext = true
         val audioProblem = audio && (error as? ExoPlaybackException)
             ?.rendererFormat?.sampleMimeType?.startsWith("audio/") == true
         if (audioProblem) {
@@ -259,7 +274,14 @@ class StreamPlayer(
             if (released) return@Runnable
             awaitingFrame = true
             startedAt = SystemClock.elapsedRealtime()
-            if (decoderProblem) rebuild() else player?.prepare()
+            if (rebuildOnNext) {
+                rebuild()
+            } else {
+                player?.let { p ->
+                    p.prepare()
+                    p.playWhenReady = true // may have been switched off by the error
+                }
+            }
         }.also { handler.postDelayed(it, delayMs) }
     }
 
@@ -272,7 +294,8 @@ class StreamPlayer(
         var t: Throwable? = error
         while (t != null) {
             val msg = t.message.orEmpty()
-            if ("401" in msg || "nauthorized" in msg) return true
+            // Whole word: "401" inside a port number ("port 40412") must not count.
+            if (AUTH_WORDS.containsMatchIn(msg)) return true
             t = t.cause
         }
         return false
@@ -293,6 +316,7 @@ class StreamPlayer(
             retiring?.release()
             retiring = null
             if (released) return@post
+            rebuildOnNext = false
             lastRendered = 0
             val current = view ?: target // the view may have changed meanwhile
             player = buildPlayer().also { p ->
@@ -324,6 +348,7 @@ class StreamPlayer(
             awaitingFrame = true
             p.stop()
             p.prepare()
+            p.playWhenReady = true
         }
     }
 

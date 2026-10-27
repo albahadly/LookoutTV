@@ -196,6 +196,8 @@ fun SettingsScreen(app: AppController) {
                 )
                 pane == Pane.CAMERAS -> CamerasPane(
                     settings = settings,
+                    unreadablePasswordIds = app.unreadablePasswordIds,
+                    saveProblem = app.saveProblem,
                     addFocus = addFocus,
                     onAdd = {
                         returnToList = true
@@ -259,6 +261,8 @@ private fun NavItem(label: String, selected: Boolean, modifier: Modifier = Modif
 @Composable
 private fun CamerasPane(
     settings: AppSettings,
+    unreadablePasswordIds: Set<String>,
+    saveProblem: String?,
     addFocus: FocusRequester,
     onAdd: () -> Unit,
     onAddFromNvr: () -> Unit,
@@ -278,6 +282,16 @@ private fun CamerasPane(
             }
         }
 
+        saveProblem?.let { Hint(it, Palette.Error) }
+        val unreadable = cameras.filter { it.id in unreadablePasswordIds }
+        if (unreadable.isNotEmpty()) {
+            Hint(
+                "The saved password for ${unreadable.joinToString { it.name }} can't be read right now. " +
+                    "If this stays after restarting the TV, edit the camera and type the password again.",
+                Palette.Warning,
+            )
+        }
+
         if (cameras.isEmpty()) {
             Hint("No cameras yet. Use Add from NVR for a recorder, or Add camera for a single camera.")
             Hint("Tip: Phone setup in the menu lets you type the addresses on your phone instead.")
@@ -289,6 +303,7 @@ private fun CamerasPane(
                 CameraRow(
                     number = i + 1,
                     camera = camera,
+                    passwordUnreadable = camera.id in unreadablePasswordIds,
                     canMoveUp = i > 0,
                     canMoveDown = i < cameras.lastIndex,
                     onToggle = { on -> onChange(cameras.map { if (it.id == camera.id) it.copy(enabled = on) else it }) },
@@ -309,6 +324,7 @@ private fun CamerasPane(
 private fun CameraRow(
     number: Int,
     camera: CameraConfig,
+    passwordUnreadable: Boolean,
     canMoveUp: Boolean,
     canMoveDown: Boolean,
     onToggle: (Boolean) -> Unit,
@@ -330,6 +346,7 @@ private fun CameraRow(
                 color = if (camera.enabled) Palette.TextBright else Palette.Quiet)
             Text(summary(camera), fontSize = 9.sp, color = Palette.Quiet, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        if (passwordUnreadable) Text("password?", fontSize = 9.sp, color = Palette.Warning)
         Text(if (camera.enabled) "Shown" else "Hidden", fontSize = 9.sp, color = Palette.Quiet)
         TvSwitch(camera.enabled, "Show ${camera.name} in grid", onToggle)
         TvButton("▲", enabled = canMoveUp, modifier = Modifier.width(40.dp)) { onMove(-1) }
@@ -448,7 +465,7 @@ private fun AboutPane(settings: AppSettings) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionTitle("About SwannTV", "Version ${BuildConfig.VERSION_NAME}")
         Hint("${settings.cameras.size} camera(s) saved, ${settings.cameras.count { it.enabled }} shown.")
-        Hint("Passwords are encrypted with a key kept in the TV's secure hardware storage.")
+        Hint("Passwords are encrypted with an Android Keystore key (hardware-backed on most TVs).")
         Hint("Diagnostics log: Android/data/com.albahadly.swanntv/files/swanntv-log.txt")
         Hint("Copy it to a computer with: adb pull /sdcard/Android/data/com.albahadly.swanntv/files/swanntv-log.txt")
     }

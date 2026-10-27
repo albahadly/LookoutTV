@@ -17,7 +17,7 @@ import com.albahadly.swanntv.model.Camera
 
 /**
  * Owns every player, so the app never runs more streams than the TV can decode:
- * at most 9 grid tiles (one page) plus the full-screen main stream and its fallback.
+ * at most 9 grid tiles (one page) plus the full-screen main stream.
  *
  * Lessons from the TCL 55C6L, built in here:
  *  - A 4K main stream fails to decode if other decoders are still open, so before it starts
@@ -85,8 +85,6 @@ class PlaybackManager(private val context: Context) {
     private val motionHits = HashMap<StreamPlayer, Int>()
 
     var main: StreamPlayer? = null
-        private set
-    var fallback: StreamPlayer? = null
         private set
 
     private var running = false
@@ -242,16 +240,6 @@ class PlaybackManager(private val context: Context) {
         main = null
     }
 
-    fun startFallback(camera: Camera, view: TextureView) {
-        stopFallback()
-        fallback = newPlayer(camera.subUrl, "${camera.name} fallback", camera.useTcp, withAudio = true).also { it.start(view) }
-    }
-
-    fun stopFallback() {
-        fallback?.let { releaseLater(it) }
-        fallback = null
-    }
-
     /** Forgets every last picture (the camera list changed, so positions mean other cameras). */
     fun clearPictures() {
         lastPictures.clear()
@@ -292,7 +280,6 @@ class PlaybackManager(private val context: Context) {
         parked.clear()
         fullQuality.clear()
         main = null
-        fallback = null
         alive.toList().forEach { releaseNow(it) }
         AppLog.i("all streams stopped")
     }
@@ -329,7 +316,6 @@ class PlaybackManager(private val context: Context) {
     private fun sweep() {
         val inUse = HashSet<StreamPlayer>(tiles.values).apply {
             main?.let { add(it) }
-            fallback?.let { add(it) }
         }
         val orphans = alive.filter { it !in inUse && it !in pendingRelease }
         if (orphans.isNotEmpty()) {
@@ -361,10 +347,8 @@ class PlaybackManager(private val context: Context) {
         }
         motion.entries.removeAll { now - it.value > MOTION_SHOW_MS }
         main?.tick()
-        fallback?.tick()
         if (ticks % SUMMARY_EVERY_TICKS == 0) {
-            AppLog.i("streams alive: ${alive.size} (tiles ${tiles.size}, main ${if (main != null) 1 else 0}, " +
-                "fallback ${if (fallback != null) 1 else 0})")
+            AppLog.i("streams alive: ${alive.size} (tiles ${tiles.size}, main ${if (main != null) 1 else 0})")
         }
     }
 

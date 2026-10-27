@@ -9,6 +9,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import java.util.UUID
 
 /** One saved camera. URLs are stored without credentials; they are added when playing. */
@@ -92,6 +95,17 @@ class SettingsStore(context: Context) {
     private val sealedCache = HashMap<String, Pair<String, String>>()
     /** Camera id -> ciphertext that couldn't be decrypted; written back untouched. */
     private val undecryptable = HashMap<String, String>()
+    /** The host:port endpoints a kept ciphertext belongs to: it must never follow a new address. */
+    private val undecryptableEndpoints = HashMap<String, Set<String?>>()
+
+    private var migratedOnLoad = false
+
+    /** Ids of cameras whose saved password can't be read right now (Settings warns about them). */
+    var unreadablePasswordIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+    /** Why the last save didn't fully work, or null (Settings shows it). */
+    var saveProblem by mutableStateOf<String?>(null)
+        private set
 
     fun load(): AppSettings {
         if (!file.baseFile.exists() && !File(dir, "settings.json.bak").exists()) {
@@ -101,7 +115,7 @@ class SettingsStore(context: Context) {
             return seeded
         }
         return try {
-            parse(JSONObject(String(file.readFully(), Charsets.UTF_8)))
+            parse(JSONObject(String(file.readFully(), Charsets.UTF_8))).also { if (migratedOnLoad) save(it) }
         } catch (e: Exception) {
             // Keep the broken file for inspection rather than overwriting it on the next save.
             AppLog.w("settings file unreadable; kept as settings.bad.json, starting from the build settings", e)
@@ -135,50 +149,82 @@ class SettingsStore(context: Context) {
                         .put("enabled", c.enabled))
                 }
             })
-        val out = file.startWrite()
+        var out: java.io.FileOutputStream? = null
         try {
+            out = file.startWrite()
             out.write(json.toString(2).toByteArray(Charsets.UTF_8))
             file.finishWrite(out) // fsync, then replace; the previous file stays as backup until then
+            saveProblem = SecretBox.problem
         } catch (e: Exception) {
-            file.failWrite(out)
+            out?.let { file.failWrite(it) }
             AppLog.w("could not save settings", e)
+            saveProblem = "Settings couldn't be written to the TV's storage (${e.javaClass.simpleName}). Changes may be lost when the app closes."
         }
+        unreadablePasswordIds = undecryptable.keys.toSet()
     }
 
     /** The ciphertext to store for [c]'s password, never losing a saved one. */
     private fun sealedPassword(c: CameraConfig): String {
-        if (c.password.isEmpty()) return undecryptable[c.id] ?: ""
+        if (c.password.isEmpty()) {
+            val kept = undecryptable[c.id] ?: return ""
+            // Only for the address it was saved with: a changed address drops it.
+            val known = undecryptableEndpoints[c.id] ?: emptySet()
+            if (endpointsOf(c).all { it in known }) return kept
+            AppLog.i("dropped an unreadable saved password: the camera's address changed")
+            undecryptable.remove(c.id)
+            undecryptableEndpoints.remove(c.id)
+            return ""
+        }
         sealedCache[c.id]?.let { (plain, sealed) -> if (plain == c.password) return sealed }
         val sealed = SecretBox.encrypt(c.password)
             ?: return sealedCache[c.id]?.second ?: undecryptable[c.id] ?: "" // Keystore hiccup: keep the old one
         sealedCache[c.id] = c.password to sealed
         undecryptable.remove(c.id)
+        undecryptableEndpoints.remove(c.id)
         return sealed
     }
 
     private fun parse(json: JSONObject): AppSettings {
         val array = json.optJSONArray("cameras") ?: JSONArray()
+        val seen = HashSet<String>()
+        var migrated = false
         val cameras = (0 until array.length()).map { i ->
             val c = array.getJSONObject(i)
-            val id = c.optString("id").ifEmpty { UUID.randomUUID().toString() }
+            // A duplicate id (hand-edited file) gets a new one: the camera list needs unique keys.
+            val id = c.optString("id").takeIf { it.isNotEmpty() && seen.add(it) } ?: UUID.randomUUID().toString().also { seen.add(it) }
             val sealed = c.optString("password")
-            val plain = SecretBox.decrypt(sealed)
-            if (plain == null) {
+            val decrypted = SecretBox.decrypt(sealed)
+            // Old files may hold a login inside the address: move it into its own (encrypted) fields.
+            val (mainUrl, urlUser, urlPass) = splitCredentials(c.optString("mainUrl"))
+            val (subUrl, _, _) = splitCredentials(c.optString("subUrl"))
+            var username = c.optString("username")
+            if (mainUrl != c.optString("mainUrl") || subUrl != c.optString("subUrl")) migrated = true
+            if (username.isEmpty() && !urlUser.isNullOrEmpty()) username = urlUser
+            val plain = when {
+                decrypted != null && decrypted.isNotEmpty() -> decrypted
+                !urlPass.isNullOrEmpty() -> urlPass // from the address; encrypted on the next save
+                else -> decrypted
+            }
+            if (decrypted == null) {
                 undecryptable[id] = sealed // keep it; written back until it decrypts or is replaced
-            } else if (sealed.isNotEmpty()) {
+                undecryptableEndpoints[id] = setOfNotNull(endpoint(mainUrl), subUrl.takeIf { it.isNotEmpty() }?.let { endpoint(it) })
+            } else if (sealed.isNotEmpty() && plain == decrypted) {
                 sealedCache[id] = plain to sealed
             }
             CameraConfig(
                 id = id,
                 name = c.optString("name", "Camera ${i + 1}"),
-                mainUrl = c.optString("mainUrl"),
-                subUrl = c.optString("subUrl"),
-                username = c.optString("username"),
+                mainUrl = mainUrl,
+                subUrl = subUrl,
+                username = username,
                 password = plain ?: "",
                 useTcp = c.optBoolean("useTcp", true),
                 enabled = c.optBoolean("enabled", true),
             )
         }.take(AppSettings.MAX_CAMERAS)
+        unreadablePasswordIds = undecryptable.keys.toSet()
+        if (migrated) AppLog.i("moved logins out of camera addresses into the login fields")
+        migratedOnLoad = migrated
         return AppSettings(
             cameras = cameras,
             layout = runCatching { LayoutPreference.valueOf(json.optString("layout")) }
@@ -239,8 +285,19 @@ class SettingsStore(context: Context) {
         fun endpoint(url: String): String? {
             val authority = url.substringAfter("://", "").substringBefore('/').substringBefore('?').substringAfterLast('@').lowercase()
             if (authority.isEmpty()) return null
-            return if (':' in authority) authority else "$authority:554"
+            val hasPort = if (authority.startsWith("[")) authority.substringAfterLast(']').startsWith(":") else ':' in authority
+            return if (hasPort) authority else "$authority:554"
         }
+
+        /** The endpoints (host:port) a camera's streams point at. */
+        fun endpointsOf(c: CameraConfig): Set<String?> =
+            setOfNotNull(endpoint(c.mainUrl), c.subUrl.takeIf { it.isNotEmpty() }?.let { endpoint(it) })
+
+        /** A host name, IPv4 address or [IPv6] address: nothing that could smuggle a login or path into a URL. */
+        fun isValidHost(host: String): Boolean =
+            HOST.matches(host) || (host.startsWith("[") && host.endsWith("]") && host.length > 3 && host.drop(1).dropLast(1).all { it.isLetterOrDigit() || it == ':' || it == '.' })
+
+        private val HOST = Regex("^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 
         /** rtsp://host/... + user/password -> rtsp://user:password@host/... (unless already present). */
         fun withCredentials(url: String, username: String, password: String): String {
