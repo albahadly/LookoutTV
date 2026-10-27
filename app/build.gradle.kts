@@ -53,13 +53,27 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        // The key Android Studio signs with, copied into the project as debug.keystore
+        // (git-ignored), so a build made on another machine installs over the one on the TV
+        // without losing its settings. Without that file, this machine's own debug key is used.
+        create("shared") {
+            val projectKey = rootProject.file("debug.keystore")
+            val debug = getByName("debug")
+            storeFile = if (projectKey.exists()) projectKey else debug.storeFile
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Sideloaded with ADB for now; replace with a real signing config before sharing.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("shared")
         }
     }
 }

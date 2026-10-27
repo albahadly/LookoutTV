@@ -51,7 +51,7 @@ nvr.subPath=/rtsp/streaming?channel={ch}&subtype=1
 
 The `probe` module still reads `nvr.password` from `local.properties`, since it has no Settings screen. That password (and the NVR address) is compiled into the probe APK as plain text, so never share a probe build. Its camera list is fixed to four Swann channels in `ProbeConfig.kt`; edit that to probe another recorder.
 
-Release builds are signed with the debug key, so installing a build from another computer needs the old one uninstalled first.
+Release builds are signed with `debug.keystore` in the project folder when it exists (git-ignored; a copy of Android Studio's `%USERPROFILE%\.android\debug.keystore`), otherwise with the building machine's own debug key. With the copy in place, builds from any machine install over each other: `adb connect <tv-ip>:5555` then `adb install -r app-release.apk`.
 
 ## Phone setup and security
 
