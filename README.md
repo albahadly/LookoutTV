@@ -75,6 +75,7 @@ The phone page is served by the TV itself, only while Settings is open on screen
 | Grid | ▲ to the header | Layout, group, Tour and Settings |
 | Anywhere | ▶ (Play) | Start / stop the camera tour |
 | Full screen | ◀ ▶ | Previous / next camera (all cameras, across pages) |
+| Full screen | 0 | Mute / unmute the camera's sound |
 | Full screen | ▲ | Zoom 2×; then OK zooms to 3×, 4× and back |
 | Full screen, zoomed | ◀ ▲ ▼ ▶ | Move around the picture |
 | Full screen | OK | Back to the grid (when not zoomed) |

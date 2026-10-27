@@ -96,6 +96,9 @@ class ViewerState(
         private set
     var overlayVisible by mutableStateOf(false)
         private set
+    /** Full-screen sound off (0 key). Kept until the app restarts, for every camera opened. */
+    var soundMuted by mutableStateOf(false)
+        private set
     var paused by mutableStateOf(false)
         private set
     /** Bumped on every resume so tiles re-attach their streams (they were stopped directly). */
@@ -186,7 +189,12 @@ class ViewerState(
 
     /** 0 key or a long press on OK: sound on/off for the selected tile. */
     fun toggleSound() {
-        if (isFullscreen) return
+        if (isFullscreen) {
+            soundMuted = !soundMuted
+            applyFullscreenSound()
+            showOverlay()
+            return
+        }
         val target = focusedIndex?.takeIf { it in visibleCameras.map { c -> c.index } }
             ?: visibleCameras.firstOrNull()?.index ?: return
         manager.listenTo(if (manager.listening == target) null else target)
@@ -239,7 +247,8 @@ class ViewerState(
         val tileIndex = expandedIndex
         if (tileIndex != null && manager.fullQualityTile(tileIndex) != null) {
             tileIsFullQuality = true
-            manager.listenTo(tileIndex) // full screen always has sound
+            manager.listenTo(tileIndex) // full screen has sound (unless muted with 0)
+            applyFullscreenSound()
             AppLog.i("${camera.name} already in full quality: keeping its stream")
             return
         }
@@ -263,7 +272,14 @@ class ViewerState(
         manager.showMain(camera, view).also {
             it.onFirstFrame = ::onMainReady
             it.onError = ::onMainFailed
+            it.setMuted(soundMuted)
         }
+    }
+
+    /** The full-screen stream (the main player, or the tile that kept playing) follows [soundMuted]. */
+    private fun applyFullscreenSound() {
+        val tile = expandedIndex?.takeIf { tileIsFullQuality }?.let { manager.fullQualityTile(it) }
+        (tile ?: manager.main)?.setMuted(soundMuted)
     }
 
     fun step(delta: Int) {
@@ -314,6 +330,8 @@ class ViewerState(
         autoCloseJob?.cancel()
         resetZoom()
         manager.captureMainPicture(index)
+        // A tile that kept playing goes back to the grid's own sound rule (the 0 key there).
+        expandedIndex?.let { manager.fullQualityTile(it)?.setMuted(false) }
         // Stop the full-screen streams directly rather than waiting for the screen to recompose.
         manager.stopMain()
         mainView = null

@@ -109,6 +109,16 @@ class StreamPlayer(
     val isReleased: Boolean get() = released
     val hasAudio: Boolean get() = audio
 
+    /** Full-screen mute: the audio track keeps playing silently, so unmuting is instant. */
+    var muted: Boolean = false
+        private set
+
+    fun setMuted(value: Boolean) {
+        if (muted == value) return
+        muted = value
+        player?.volume = if (audio && !muted) 1f else 0f
+    }
+
     /**
      * Turns the camera's sound on or off on a running stream. Opens only an audio decoder
      * (software, cheap); the video decoder is untouched.
@@ -120,7 +130,7 @@ class StreamPlayer(
         p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, !enabled)
             .build()
-        p.volume = if (enabled) 1f else 0f
+        p.volume = if (enabled && !muted) 1f else 0f
         AppLog.i("$debugName sound ${if (enabled) "on" else "off"}")
         if (enabled && !released) {
             // Media3's RTSP source can't take a dropped track back on a playing session: open
@@ -223,6 +233,7 @@ class StreamPlayer(
                         AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
                         /* handleAudioFocus = */ false,
                     )
+                    if (muted) volume = 0f
                 } else {
                     // No audio decoder at all: cheaper, and video timing follows the clock.
                     trackSelectionParameters = trackSelectionParameters.buildUpon()

@@ -128,6 +128,7 @@ private fun onScreenKey(event: KeyEvent, state: ViewerState): Boolean {
         if (down) state.showOverlay()
         val zoomed = state.zoom > 1
         return when {
+            event.key in SOUND_KEYS -> { if (down) state.toggleSound(); true }
             event.key == Key.DirectionLeft -> { if (down) { if (zoomed) state.pan(-1, 0) else state.stepByUser(-1) }; true }
             event.key == Key.DirectionRight -> { if (down) { if (zoomed) state.pan(1, 0) else state.stepByUser(+1) }; true }
             event.key == Key.DirectionUp -> { if (down) { if (zoomed) state.pan(0, -1) else state.zoomIn() }; true }
@@ -338,11 +339,12 @@ private fun FullscreenLayer(state: ViewerState) {
       }
 
         // Always visible (not only with the overlay): zoom level and tour countdown.
-        if (state.zoom > 1 || state.touring) {
+        if (state.zoom > 1 || state.touring || state.soundMuted) {
             Text(
                 listOfNotNull(
                     if (state.touring) "▶ Tour · next camera in ${state.tourCountdown} s" else null,
                     if (state.zoom > 1) "Zoom ${state.zoom}×" else null,
+                    if (state.soundMuted) "♪ Muted" else null,
                 ).joinToString("   "),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -430,6 +432,7 @@ private fun FullscreenOverlay(state: ViewerState, camera: Camera) {
                 else -> {
                     if (cameras.size > 1) KeyHint("◀ ▶", "Previous / next camera")
                     KeyHint("▲", "Zoom")
+                    KeyHint("0", if (state.soundMuted) "Sound on" else "Mute")
                     KeyHint("OK", "Back to grid")
                 }
             }
