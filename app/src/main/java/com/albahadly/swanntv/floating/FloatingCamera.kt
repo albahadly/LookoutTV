@@ -19,6 +19,8 @@ import android.widget.TextView
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import com.albahadly.swanntv.AppLog
+import com.albahadly.swanntv.data.FloatingCorner
+import com.albahadly.swanntv.data.FloatingSize
 import com.albahadly.swanntv.model.Camera
 import com.albahadly.swanntv.playback.StreamPlayer
 
@@ -54,11 +56,17 @@ object FloatingCamera {
     fun canShow(context: Context): Boolean = Settings.canDrawOverlays(context)
 
     /** Shows [camera] in the corner. False if the TV refused the window. */
-    fun show(context: Context, camera: Camera, lastPicture: ImageBitmap?): Boolean {
+    fun show(
+        context: Context,
+        camera: Camera,
+        lastPicture: ImageBitmap?,
+        size: FloatingSize = FloatingSize.MEDIUM,
+        corner: FloatingCorner = FloatingCorner.BOTTOM_RIGHT,
+    ): Boolean {
         hide()
         val wm = context.getSystemService(WindowManager::class.java)
         val metrics = context.resources.displayMetrics
-        val width = (metrics.widthPixels * 0.28f).toInt()
+        val width = (metrics.widthPixels * size.widthFraction).toInt()
         val height = width * 9 / 16
         val margin = (metrics.widthPixels * 0.025f).toInt()
 
@@ -93,7 +101,12 @@ object FloatingCamera {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = Gravity.BOTTOM or Gravity.END
+            gravity = when (corner) {
+                FloatingCorner.TOP_LEFT -> Gravity.TOP or Gravity.START
+                FloatingCorner.TOP_RIGHT -> Gravity.TOP or Gravity.END
+                FloatingCorner.BOTTOM_LEFT -> Gravity.BOTTOM or Gravity.START
+                FloatingCorner.BOTTOM_RIGHT -> Gravity.BOTTOM or Gravity.END
+            }
             x = margin
             y = margin
         }

@@ -453,14 +453,11 @@ class ViewerState(
     // ------------------------------------------------------------------ floating window
 
     /**
-     * The camera for the floating window when Home is pressed: the one full screen, else the
-     * selected tile, else the first. Only cameras with a light grid stream: a 4K picture
+     * The camera for the floating window when Home is pressed: only the one open full screen
+     * (from the grid, Home just leaves). It must have a light grid stream: a 4K picture
      * floating over other apps could stop their video on this TV.
      */
-    fun floatingCandidate(): Camera? {
-        val camera = fullCamera ?: cameras.firstOrNull { it.index == focusedIndex } ?: cameras.firstOrNull()
-        return camera?.takeIf { it.subUrl != it.mainUrl } ?: cameras.firstOrNull { it.subUrl != it.mainUrl }
-    }
+    fun floatingCandidate(): Camera? = fullCamera?.takeIf { it.subUrl != it.mainUrl }
 
     fun resume() {
         // Only after a real pause: bumping on first start restarted every tile once for nothing.

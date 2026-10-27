@@ -159,9 +159,11 @@ class AppController(context: Context, private val scope: CoroutineScope) {
         val allowed = FloatingCamera.canShow(appContext)
         AppLog.i("home pressed: floating window setting=${settings.pictureInPicture} permission=$allowed screen=$screen")
         if (!settings.pictureInPicture || !allowed || screen != Screen.VIEWER || !started) return
-        val camera = viewer.floatingCandidate() ?: return
+        val camera = viewer.floatingCandidate() ?: return // only from full screen
         viewer.pause() // releases every stream now (the 4K one included)
-        if (FloatingCamera.show(appContext, camera, manager.lastPictures[camera.index])) {
+        if (FloatingCamera.show(
+                appContext, camera, manager.lastPictures[camera.index], settings.floatingSize, settings.floatingCorner,
+            )) {
             FloatingCameraService.start(appContext)
         }
     }

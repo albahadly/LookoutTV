@@ -41,6 +41,8 @@ import com.albahadly.swanntv.BuildConfig
 import com.albahadly.swanntv.data.AppSettings
 import com.albahadly.swanntv.data.CameraConfig
 import com.albahadly.swanntv.data.LayoutPreference
+import com.albahadly.swanntv.data.FloatingSize
+import com.albahadly.swanntv.data.FloatingCorner
 import com.albahadly.swanntv.floating.FloatingCamera
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.verticalScroll
@@ -395,7 +397,29 @@ private fun ViewingPane(settings: AppSettings, onChange: (AppSettings) -> Unit) 
             TvSwitch(settings.pictureInPicture, "Floating camera window") { onChange(settings.copy(pictureInPicture = it)) }
             Text(if (settings.pictureInPicture) "On" else "Off", fontSize = 12.sp, color = Palette.Text)
         }
-        Hint("Press Home while watching: the camera you were on (or the selected one) keeps playing in the corner, without sound. Open SwannTV again to close it.")
+        if (settings.pictureInPicture) {
+            Hint("Size")
+            TvChoice(
+                listOf(
+                    FloatingSize.SMALL to "Small",
+                    FloatingSize.MEDIUM to "Medium",
+                    FloatingSize.LARGE to "Large",
+                    FloatingSize.EXTRA_LARGE to "Half screen",
+                ),
+                settings.floatingSize,
+            ) { onChange(settings.copy(floatingSize = it)) }
+            Hint("Corner")
+            TvChoice(
+                listOf(
+                    FloatingCorner.TOP_LEFT to "↖ Top left",
+                    FloatingCorner.TOP_RIGHT to "↗ Top right",
+                    FloatingCorner.BOTTOM_LEFT to "↙ Bottom left",
+                    FloatingCorner.BOTTOM_RIGHT to "↘ Bottom right",
+                ),
+                settings.floatingCorner,
+            ) { onChange(settings.copy(floatingCorner = it)) }
+        }
+        Hint("Press Home while a camera is open full screen: it keeps playing in the corner, without sound. From the grid, Home just leaves the app. Open SwannTV again to close the window.")
         if (canFloat) {
             Hint("Permission to show over other apps: granted.", Palette.Text)
         } else {

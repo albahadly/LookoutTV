@@ -10,7 +10,7 @@ An Android TV app for watching RTSP security cameras — built for a Swann NVR o
 - **Motion highlight**: grid cameras with movement get an orange border and a MOTION label; optionally the camera opens full screen and returns to the grid after 30 s.
 - **Zoom**: ▲ in full screen zooms 2×, 3×, 4× into the 4K picture; the D-pad moves around, Back zooms out.
 - **Camera tour**: ▶ Tour (or the Play button) shows each camera full screen in turn, 5 s to 1 min each.
-- **Floating camera window** (off by default, Settings → Viewing): press Home while watching and the camera keeps playing in a corner over other apps. Needs a one-time `adb shell appops set com.albahadly.swanntv SYSTEM_ALERT_WINDOW allow` (the TCL refuses Android picture-in-picture).
+- **Floating camera window** (off by default, Settings → Viewing): press Home while a camera is full screen and it keeps playing in a corner over other apps; pick its size and corner in Settings. Needs a one-time `adb shell appops set com.albahadly.swanntv SYSTEM_ALERT_WINDOW allow` (the TCL refuses Android picture-in-picture).
 - **Built for the remote**: D-pad, OK, Back, number keys 1–9, channel ± for pages.
 - **Stays up**: reconnects with backoff, rebuilds the player on decoder errors, restarts frozen streams, and shows each camera's last picture instead of a black tile.
 

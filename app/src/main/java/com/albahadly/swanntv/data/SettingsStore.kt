@@ -31,6 +31,12 @@ enum class LayoutPreference { AUTO, ONE, FOUR, NINE }
 /** What the viewer does when it sees movement on a grid camera. */
 enum class MotionMode { OFF, HIGHLIGHT, OPEN }
 
+/** Floating camera window size, as a share of the screen width. */
+enum class FloatingSize(val widthFraction: Float) { SMALL(0.2f), MEDIUM(0.28f), LARGE(0.38f), EXTRA_LARGE(0.5f) }
+
+/** Which corner of the screen the floating camera window sits in. */
+enum class FloatingCorner { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT }
+
 /** How much of the picture must change to count as movement. */
 enum class MotionSensitivity(val changedFraction: Float) { LOW(0.06f), MEDIUM(0.03f), HIGH(0.015f) }
 
@@ -46,6 +52,8 @@ data class AppSettings(
     val motionSensitivity: MotionSensitivity = MotionSensitivity.MEDIUM,
     /** Camera tour: seconds on each camera. */
     val tourSeconds: Int = 10,
+    val floatingSize: FloatingSize = FloatingSize.MEDIUM,
+    val floatingCorner: FloatingCorner = FloatingCorner.BOTTOM_RIGHT,
 ) {
     val hasPin: Boolean get() = pinHash.isNotEmpty()
 
@@ -112,6 +120,8 @@ class SettingsStore(context: Context) {
             .put("motionMode", settings.motionMode.name)
             .put("motionSensitivity", settings.motionSensitivity.name)
             .put("tourSeconds", settings.tourSeconds)
+            .put("floatingSize", settings.floatingSize.name)
+            .put("floatingCorner", settings.floatingCorner.name)
             .put("cameras", JSONArray().apply {
                 settings.cameras.forEach { c ->
                     put(JSONObject()
@@ -180,6 +190,9 @@ class SettingsStore(context: Context) {
             motionSensitivity = runCatching { MotionSensitivity.valueOf(json.optString("motionSensitivity")) }
                 .getOrDefault(MotionSensitivity.MEDIUM),
             tourSeconds = json.optInt("tourSeconds", 10).coerceIn(3, 120),
+            floatingSize = runCatching { FloatingSize.valueOf(json.optString("floatingSize")) }.getOrDefault(FloatingSize.MEDIUM),
+            floatingCorner = runCatching { FloatingCorner.valueOf(json.optString("floatingCorner")) }
+                .getOrDefault(FloatingCorner.BOTTOM_RIGHT),
         )
     }
 
