@@ -7,6 +7,10 @@ An Android TV app for watching RTSP security cameras — built for a Swann NVR o
 - **Settings on the TV**: add a whole NVR in one step or single cameras, test them, reorder, hide, rename; optional PIN lock.
 - **Phone setup**: scan a QR code in Settings and do the same from your phone's browser, plus backup and restore.
 - **Instant full screen**: the tile fills the screen in under 0.2 s, then the full-quality (4K) stream takes over within a second, with the camera's sound (the grid stays silent).
+- **Motion highlight**: grid cameras with movement get an orange border and a MOTION label; optionally the camera opens full screen and returns to the grid after 30 s.
+- **Zoom**: ▲ in full screen zooms 2×, 3×, 4× into the 4K picture; the D-pad moves around, Back zooms out.
+- **Camera tour**: ▶ Tour (or the Play button) shows each camera full screen in turn, 5 s to 1 min each.
+- **Picture-in-picture** (off by default, Settings → Viewing): press Home while watching and the camera keeps playing in a corner window on its light grid stream.
 - **Built for the remote**: D-pad, OK, Back, number keys 1–9, channel ± for pages.
 - **Stays up**: reconnects with backoff, rebuilds the player on decoder errors, restarts frozen streams, and shows each camera's last picture instead of a black tile.
 

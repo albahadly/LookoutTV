@@ -76,7 +76,10 @@ fun CameraTile(
     Box(
         modifier
             .focusRequester(focusRequester)
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) state.focusedIndex = camera.index
+            }
             .onPreviewKeyEvent { event -> !fullscreen && onTileKey(event, camera, slot, state) }
             .focusable()
             .background(Palette.Tile)
@@ -100,6 +103,10 @@ fun CameraTile(
         if (!fullscreen) {
             if (status == StreamPlayer.Status.LIVE) LiveBadge(Modifier.align(Alignment.TopStart).padding(8.dp))
             NameChip(camera, focused, Modifier.align(Alignment.BottomStart).padding(8.dp))
+            if (state.manager.motion.containsKey(camera.index)) {
+                Box(Modifier.fillMaxSize().border(4.dp, Palette.Motion))
+                MotionBadge(Modifier.align(Alignment.TopEnd).padding(8.dp))
+            }
             if (focused) Box(Modifier.fillMaxSize().border(3.dp, Palette.Accent))
         }
     }
@@ -151,6 +158,19 @@ private fun NameChip(camera: Camera, focused: Boolean, modifier: Modifier) {
             color = if (focused) Palette.OnAccent else Palette.TextBright,
         )
     }
+}
+
+@Composable
+private fun MotionBadge(modifier: Modifier) {
+    Text(
+        "MOTION",
+        fontSize = 8.sp,
+        fontWeight = FontWeight.Bold,
+        color = Palette.OnAccent,
+        modifier = modifier
+            .background(Palette.Motion, RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 3.dp),
+    )
 }
 
 @Composable

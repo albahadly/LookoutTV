@@ -32,7 +32,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -54,7 +56,7 @@ fun ViewerScreen(state: ViewerState, onOpenSettings: () -> Unit) {
     val focusRequesters = remember { HashMap<Int, FocusRequester>() }
     fun requester(index: Int) = focusRequesters.getOrPut(index) { FocusRequester() }
 
-    BackHandler(enabled = state.isFullscreen) { state.close() }
+    BackHandler(enabled = state.isFullscreen) { state.back() }
 
     // Move focus where the state asks (start-up, page change, back from full screen).
     LaunchedEffect(state.focusTarget, state.isFullscreen, state.page, state.layout) {
@@ -116,13 +118,20 @@ fun ViewerScreen(state: ViewerState, onOpenSettings: () -> Unit) {
 /** Keys handled for the whole screen, before the focused tile sees them. */
 private fun onScreenKey(event: KeyEvent, state: ViewerState): Boolean {
     val down = event.type == KeyEventType.KeyDown
+    if (down) state.userActivity()
+    if (event.key in PLAY_KEYS) {
+        if (down) state.toggleTour()
+        return true
+    }
     if (state.isFullscreen) {
         if (down) state.showOverlay()
+        val zoomed = state.zoom > 1
         return when {
-            event.key == Key.DirectionLeft -> { if (down) state.step(-1); true }
-            event.key == Key.DirectionRight -> { if (down) state.step(+1); true }
-            event.key.isSelect() -> { if (!down) state.close(); true }
-            event.key == Key.DirectionUp || event.key == Key.DirectionDown -> true
+            event.key == Key.DirectionLeft -> { if (down) { if (zoomed) state.pan(-1, 0) else state.stepByUser(-1) }; true }
+            event.key == Key.DirectionRight -> { if (down) { if (zoomed) state.pan(1, 0) else state.stepByUser(+1) }; true }
+            event.key == Key.DirectionUp -> { if (down) { if (zoomed) state.pan(0, -1) else state.zoomIn() }; true }
+            event.key == Key.DirectionDown -> { if (down && zoomed) state.pan(0, 1); true }
+            event.key.isSelect() -> { if (!down) { if (zoomed) state.zoomIn() else state.close() }; true }
             else -> false
         }
     }
@@ -135,6 +144,7 @@ private fun onScreenKey(event: KeyEvent, state: ViewerState): Boolean {
     }
 }
 
+private val PLAY_KEYS = setOf(Key.MediaPlay, Key.MediaPlayPause)
 private val NEXT_PAGE_KEYS = setOf(Key.ChannelUp, Key.PageDown, Key.MediaNext)
 private val PREVIOUS_PAGE_KEYS = setOf(Key.ChannelDown, Key.PageUp, Key.MediaPrevious)
 
@@ -208,6 +218,10 @@ private fun Header(state: ViewerState, onOpenSettings: () -> Unit, modifier: Mod
                 FocusChip(layout.label, selected = layout == state.layout) { state.changeLayout(layout) }
             }
         }
+        if (state.cameras.size > 1) {
+            HSpace(12)
+            FocusChip("▶  Tour", selected = false) { state.toggleTour() }
+        }
         HSpace(16)
         Text(rememberClock(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Palette.Text)
         HSpace(16)
@@ -228,6 +242,7 @@ private fun Footer(state: ViewerState, modifier: Modifier) {
         KeyHint("OK", "Full screen")
         KeyHint("◀ ▲ ▼ ▶", "Move")
         KeyHint("1–9", "Camera")
+        if (state.cameras.size > 1) KeyHint("▶", "Tour")
         if (state.pageCount > 1) {
             KeyHint("CH ±", "Page")
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
@@ -253,6 +268,19 @@ private fun FullscreenLayer(state: ViewerState) {
     }
 
     Box(Modifier.fillMaxSize()) {
+      // Zoom scales the picture layer (TextureView and still pictures; a SurfaceView can't be).
+      Box(
+          Modifier
+              .fillMaxSize()
+              .clipToBounds()
+              .graphicsLayer {
+                  val z = state.zoom.toFloat()
+                  scaleX = z
+                  scaleY = z
+                  translationX = -state.panX * (z - 1f) / 2f * size.width
+                  translationY = -state.panY * (z - 1f) / 2f * size.height
+              }
+      ) {
         // Once the grown tile stops: black, then this camera's last picture (the frozen frame
         // on open, the grid's latest after left/right) until the 4K stream is ready.
         if (!state.expandedPlaying) {
@@ -274,6 +302,25 @@ private fun FullscreenLayer(state: ViewerState) {
 
         if (state.fallbackShowing) {
             key(camera.index) { FallbackStream(state, camera) }
+        }
+      }
+
+        // Always visible (not only with the overlay): zoom level and tour countdown.
+        if (state.zoom > 1 || state.touring) {
+            Text(
+                listOfNotNull(
+                    if (state.touring) "▶ Tour · next camera in ${state.tourCountdown} s" else null,
+                    if (state.zoom > 1) "Zoom ${state.zoom}×" else null,
+                ).joinToString("   "),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Palette.TextBright,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 20.dp)
+                    .background(Palette.Scrim, RoundedCornerShape(16.dp))
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+            )
         }
 
         AnimatedVisibility(state.overlayVisible, enter = fadeIn(), exit = fadeOut()) {
@@ -353,8 +400,22 @@ private fun FullscreenOverlay(state: ViewerState, camera: Camera) {
                 .background(Palette.Scrim, RoundedCornerShape(10.dp))
                 .padding(horizontal = 14.dp, vertical = 8.dp),
         ) {
-            if (cameras.size > 1) KeyHint("◀ ▶", "Previous / next camera")
-            KeyHint("OK", "Back to grid")
+            when {
+                state.zoom > 1 -> {
+                    KeyHint("◀ ▲ ▼ ▶", "Move")
+                    KeyHint("OK", if (state.zoom < 4) "Zoom more" else "Zoom out")
+                    KeyHint("Back", "Zoom out")
+                }
+                state.touring -> {
+                    KeyHint("◀ ▶", "Previous / next camera")
+                    KeyHint("OK / ▶", "Stop tour")
+                }
+                else -> {
+                    if (cameras.size > 1) KeyHint("◀ ▶", "Previous / next camera")
+                    KeyHint("▲", "Zoom")
+                    KeyHint("OK", "Back to grid")
+                }
+            }
         }
     }
 }

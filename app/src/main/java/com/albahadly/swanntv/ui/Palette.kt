@@ -15,6 +15,7 @@ object Palette {
     val OnAccent = Color(0xFF0B1220)
     val Live = Color(0xFFFF6B5F)
     val Warning = Color(0xFFFFD08A)
+    val Motion = Color(0xFFFFB020)
     val Error = Color(0xFFFFA39B)
     val Scrim = Color(0xCC0A0C10)
 }

@@ -38,6 +38,14 @@ class PlaybackManager(private val context: Context) {
         const val FREEZE_WIDTH = 960
         const val FREEZE_HEIGHT = 540
         const val SUMMARY_EVERY_TICKS = 10
+        // Motion: compare a tiny greyscale copy of each tile once a second.
+        const val MOTION_WIDTH = 64
+        const val MOTION_HEIGHT = 36
+        /** A pixel counts as changed if its brightness moved by more than this (0-255). */
+        const val MOTION_PIXEL_DELTA = 28
+        /** More than this much of the picture changing at once is light, not movement. */
+        const val MOTION_LIGHT_CHANGE = 0.5f
+        const val MOTION_SHOW_MS = 10_000L
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -63,9 +71,25 @@ class PlaybackManager(private val context: Context) {
     /** Last picture of each camera (by camera index), shown while a tile is not live. */
     val lastPictures = mutableStateMapOf<Int, ImageBitmap>()
 
+    /** Cameras where movement was seen recently (camera index -> when), shown on their tiles. */
+    val motion = mutableStateMapOf<Int, Long>()
+    /** Motion detection threshold (fraction of the picture), or null when it's off. */
+    var motionThreshold: Float? = null
+        set(value) {
+            field = value
+            if (value == null) { motion.clear(); motionLast.clear(); motionHits.clear() }
+        }
+    /** Main thread: movement just started on this camera's tile. */
+    var onMotion: ((Int) -> Unit)? = null
+    private val motionLast = HashMap<StreamPlayer, IntArray>()
+    private val motionHits = HashMap<StreamPlayer, Int>()
+
     var main: StreamPlayer? = null
         private set
     var fallback: StreamPlayer? = null
+        private set
+    /** The picture-in-picture window's stream. */
+    var pip: StreamPlayer? = null
         private set
 
     private var running = false
@@ -226,6 +250,25 @@ class PlaybackManager(private val context: Context) {
         fallback = newPlayer(camera.subUrl, "${camera.name} fallback", camera.useTcp, withAudio = true).also { it.start(view) }
     }
 
+    /** Picture-in-picture: the camera's light grid stream, no sound. */
+    fun startPip(camera: Camera, view: SurfaceView): StreamPlayer {
+        stopPip()
+        return newPlayer(camera.subUrl, "${camera.name} pip", camera.useTcp).also {
+            it.start(view)
+            pip = it
+        }
+    }
+
+    fun stopPip() {
+        pip?.let { releaseLater(it) }
+        pip = null
+    }
+
+    fun stopPipNow() {
+        pip?.let { releaseNow(it) }
+        pip = null
+    }
+
     fun stopFallback() {
         fallback?.let { releaseLater(it) }
         fallback = null
@@ -272,6 +315,7 @@ class PlaybackManager(private val context: Context) {
         fullQuality.clear()
         main = null
         fallback = null
+        pip = null
         alive.toList().forEach { releaseNow(it) }
         AppLog.i("all streams stopped")
     }
@@ -287,6 +331,8 @@ class PlaybackManager(private val context: Context) {
         pendingRelease -= player
         parked.values.remove(player)
         fullQuality -= player
+        motionLast -= player
+        motionHits -= player
         alive -= player
         player.release()
     }
@@ -307,6 +353,7 @@ class PlaybackManager(private val context: Context) {
         val inUse = HashSet<StreamPlayer>(tiles.values).apply {
             main?.let { add(it) }
             fallback?.let { add(it) }
+            pip?.let { add(it) }
         }
         val orphans = alive.filter { it !in inUse && it !in pendingRelease }
         if (orphans.isNotEmpty()) {
@@ -325,18 +372,68 @@ class PlaybackManager(private val context: Context) {
         ticks++
         sweep()
         val now = SystemClock.elapsedRealtime()
+        val threshold = motionThreshold
         for ((index, player) in tiles) {
             player.tick()
             val takenAt = pictureTakenAt[index]
             if (player.isLive && (takenAt == null || now - takenAt >= PICTURE_EVERY_MS)) {
                 captureTile(index, player)
             }
+            if (threshold != null) {
+                if (player.isLive) checkMotion(index, player, threshold) else motionLast -= player
+            }
         }
+        motion.entries.removeAll { now - it.value > MOTION_SHOW_MS }
         main?.tick()
         fallback?.tick()
+        pip?.tick()
         if (ticks % SUMMARY_EVERY_TICKS == 0) {
             AppLog.i("streams alive: ${alive.size} (tiles ${tiles.size}, main ${if (main != null) 1 else 0}, " +
                 "fallback ${if (fallback != null) 1 else 0})")
+        }
+    }
+
+    /**
+     * Compares the tile's picture with the one from a second ago. Movement must show in two
+     * checks running, and a change over most of the picture (lights, night mode) is ignored.
+     */
+    private fun checkMotion(index: Int, player: StreamPlayer, threshold: Float) {
+        val view = player.view as? SurfaceView ?: return
+        if (!view.holder.surface.isValid) return
+        val bitmap = Bitmap.createBitmap(MOTION_WIDTH, MOTION_HEIGHT, Bitmap.Config.ARGB_8888)
+        val done = { result: Int ->
+            if (result == PixelCopy.SUCCESS && tiles[index] === player) compareMotion(index, player, bitmap, threshold)
+            bitmap.recycle()
+        }
+        try {
+            PixelCopy.request(view, bitmap, { done(it) }, handler)
+        } catch (e: IllegalArgumentException) {
+            bitmap.recycle()
+        }
+    }
+
+    private fun compareMotion(index: Int, player: StreamPlayer, bitmap: Bitmap, threshold: Float) {
+        val pixels = IntArray(MOTION_WIDTH * MOTION_HEIGHT)
+        bitmap.getPixels(pixels, 0, MOTION_WIDTH, 0, 0, MOTION_WIDTH, MOTION_HEIGHT)
+        val luma = IntArray(pixels.size) { i ->
+            val p = pixels[i]
+            ((p shr 16 and 0xFF) * 77 + (p shr 8 and 0xFF) * 150 + (p and 0xFF) * 29) shr 8
+        }
+        val previous = motionLast.put(player, luma) ?: return
+        var changed = 0
+        for (i in luma.indices) if (kotlin.math.abs(luma[i] - previous[i]) > MOTION_PIXEL_DELTA) changed++
+        val fraction = changed.toFloat() / luma.size
+        val moving = fraction >= threshold && fraction < MOTION_LIGHT_CHANGE
+        val hits = if (moving) (motionHits[player] ?: 0) + 1 else 0
+        motionHits[player] = hits
+        if (hits < 2) return
+        val now = SystemClock.elapsedRealtime()
+        val since = motion[index]
+        // Refresh only when new or half-way to expiring: every write recomposes the tiles.
+        if (since == null || now - since > MOTION_SHOW_MS / 2) motion[index] = now
+        if (since == null) {
+            AppLog.i("motion on ${player.debugName} (${(fraction * 100).toInt()}% of the picture)")
+            onMotion?.invoke(index)
         }
     }
 

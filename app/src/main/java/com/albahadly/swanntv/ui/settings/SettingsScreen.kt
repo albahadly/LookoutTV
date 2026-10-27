@@ -41,11 +41,15 @@ import com.albahadly.swanntv.BuildConfig
 import com.albahadly.swanntv.data.AppSettings
 import com.albahadly.swanntv.data.CameraConfig
 import com.albahadly.swanntv.data.LayoutPreference
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import com.albahadly.swanntv.data.MotionSensitivity
+import com.albahadly.swanntv.data.MotionMode
 import com.albahadly.swanntv.ui.AppController
 import com.albahadly.swanntv.ui.Palette
 
 private enum class Pane(val label: String) {
-    CAMERAS("Cameras"), PHONE("Phone setup"), LAYOUT("Layout"), SECURITY("PIN lock"), ABOUT("About")
+    CAMERAS("Cameras"), PHONE("Phone setup"), LAYOUT("Viewing"), SECURITY("PIN lock"), ABOUT("About")
 }
 
 private enum class PinFlow { SET, REMOVE }
@@ -204,7 +208,7 @@ fun SettingsScreen(app: AppController) {
                     onChange = { app.update(settings.copy(cameras = it)) },
                 )
                 pane == Pane.PHONE -> PhoneSetupPane(app.phoneSetupUrl, app.phoneSetupAddress, app.phoneSetupCode, app.phoneSetupIdle, onRetry = app::startPhoneSetup)
-                pane == Pane.LAYOUT -> LayoutPane(settings.layout) { app.update(settings.copy(layout = it)) }
+                pane == Pane.LAYOUT -> ViewingPane(settings) { app.update(it) }
                 pane == Pane.SECURITY -> SecurityPane(
                     hasPin = settings.hasPin,
                     onSet = { pinFlow = PinFlow.SET },
@@ -338,8 +342,11 @@ private fun summary(camera: CameraConfig): String {
 }
 
 @Composable
-private fun LayoutPane(current: LayoutPreference, onChange: (LayoutPreference) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+private fun ViewingPane(settings: AppSettings, onChange: (AppSettings) -> Unit) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 16.dp),
+    ) {
         SectionTitle("Grid layout", "How the cameras are arranged when the app opens")
         TvChoice(
             listOf(
@@ -348,11 +355,44 @@ private fun LayoutPane(current: LayoutPreference, onChange: (LayoutPreference) -
                 LayoutPreference.FOUR to "2×2",
                 LayoutPreference.NINE to "3×3",
             ),
-            current,
-            onChange,
-        )
-        Hint("Automatic picks 1, 2×2 or 3×3 from the number of cameras. You can also switch layout from the grid's header.")
+            settings.layout,
+        ) { onChange(settings.copy(layout = it)) }
+        Hint("Automatic picks 1, 2×2 or 3×3 from the number of cameras. With 1 camera on screen it plays in full quality, with sound.")
         Hint("The grid never shows more than 9 at once: this TV can't play more live streams smoothly. More cameras go on a second page.")
+
+        Spacer(Modifier.height(8.dp))
+        SectionTitle("Motion", "The grid watches its cameras for movement")
+        TvChoice(
+            listOf(MotionMode.OFF to "Off", MotionMode.HIGHLIGHT to "Highlight the camera", MotionMode.OPEN to "Open it full screen"),
+            settings.motionMode,
+        ) { onChange(settings.copy(motionMode = it)) }
+        if (settings.motionMode != MotionMode.OFF) {
+            Hint("Sensitivity")
+            TvChoice(
+                listOf(MotionSensitivity.LOW to "Low", MotionSensitivity.MEDIUM to "Medium", MotionSensitivity.HIGH to "High"),
+                settings.motionSensitivity,
+            ) { onChange(settings.copy(motionSensitivity = it)) }
+        }
+        Hint("Works for the cameras on screen in the grid. Rain, trees or headlights can count as movement: lower the sensitivity if it triggers too often.")
+        if (settings.motionMode == MotionMode.OPEN) {
+            Hint("A camera opened by motion goes back to the grid after 30 seconds if no button is pressed.")
+        }
+
+        Spacer(Modifier.height(8.dp))
+        SectionTitle("Camera tour", "Shows each camera full screen in turn (▶ Tour in the grid, or the Play button)")
+        TvChoice(
+            listOf(5 to "5 s", 10 to "10 s", 20 to "20 s", 30 to "30 s", 60 to "1 min"),
+            settings.tourSeconds,
+        ) { onChange(settings.copy(tourSeconds = it)) }
+
+        Spacer(Modifier.height(8.dp))
+        SectionTitle("Picture-in-picture", "Keep watching in a small window while you use the TV")
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            TvSwitch(settings.pictureInPicture, "Picture-in-picture") { onChange(settings.copy(pictureInPicture = it)) }
+            Text(if (settings.pictureInPicture) "On" else "Off", fontSize = 12.sp, color = Palette.Text)
+        }
+        Hint("Press Home while watching: the camera you were on (or the selected one) keeps playing in a corner on its light grid stream, without sound.")
+        Hint("Off by default: on this TV a 4K video in another app can fail while the corner window plays. Close the window if that happens.", Palette.Warning)
     }
 }
 

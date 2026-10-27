@@ -1,6 +1,7 @@
 package com.albahadly.swanntv.ui
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
@@ -11,6 +12,7 @@ import androidx.compose.runtime.setValue
 import com.albahadly.swanntv.AppLog
 import com.albahadly.swanntv.data.AppSettings
 import com.albahadly.swanntv.data.LayoutPreference
+import com.albahadly.swanntv.data.MotionMode
 import com.albahadly.swanntv.data.SettingsStore
 import com.albahadly.swanntv.model.CameraRepository
 import com.albahadly.swanntv.playback.CameraTester
@@ -32,6 +34,7 @@ enum class Screen { VIEWER, PIN, SETTINGS }
 class AppController(context: Context, private val scope: CoroutineScope) {
 
     private val store = SettingsStore(context)
+    private val pipSupported = context.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
     val manager = PlaybackManager(context)
     val tester = CameraTester(context)
 
@@ -143,6 +146,18 @@ class AppController(context: Context, private val scope: CoroutineScope) {
         }
     }
 
+    /** Home pressed: should the app shrink to a picture-in-picture window? */
+    fun canEnterPip(): Boolean =
+        pipSupported && started && settings.pictureInPicture && screen == Screen.VIEWER && viewer.cameras.isNotEmpty()
+
+    fun enterPip(): Boolean = viewer.enterPip()
+
+    val inPip: Boolean get() = viewer.pipCamera != null
+
+    fun exitPip() = viewer.exitPip()
+
+    fun cancelPip() = viewer.cancelPip()
+
     fun onStop() {
         started = false
         tester.cancel()
@@ -157,7 +172,14 @@ class AppController(context: Context, private val scope: CoroutineScope) {
         manager.releaseAll()
     }
 
-    private fun buildViewer() = ViewerState(
+    private fun buildViewer(): ViewerState {
+        manager.motionThreshold = if (settings.motionMode == MotionMode.OFF) null else settings.motionSensitivity.changedFraction
+        return newViewer()
+    }
+
+    private fun newViewer() = ViewerState(
+        motionOpens = settings.motionMode == MotionMode.OPEN,
+        tourSeconds = settings.tourSeconds,
         cameras = CameraRepository.fromSettings(settings),
         manager = manager,
         scope = scope,
@@ -180,7 +202,11 @@ class AppController(context: Context, private val scope: CoroutineScope) {
 @Composable
 fun AppRoot(app: AppController) {
     when (app.screen) {
-        Screen.VIEWER -> ViewerScreen(app.viewer, onOpenSettings = app::openSettings)
+        Screen.VIEWER -> {
+            val pipCamera = app.viewer.pipCamera
+            if (pipCamera != null) PipView(app.viewer, pipCamera)
+            else ViewerScreen(app.viewer, onOpenSettings = app::openSettings)
+        }
         Screen.PIN -> {
             BackHandler { app.closeSettings() }
             PinPad(

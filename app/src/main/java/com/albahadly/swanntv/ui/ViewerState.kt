@@ -4,6 +4,7 @@ import android.view.TextureView
 import android.os.SystemClock
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -40,6 +41,10 @@ class ViewerState(
     initialLayout: GridLayout? = null,
     /** Called when the user picks a layout in the grid, so it can be saved. */
     private val onLayoutChanged: (GridLayout) -> Unit = {},
+    /** Motion on a grid camera opens it full screen (else it's only highlighted). */
+    private val motionOpens: Boolean = false,
+    /** Camera tour: seconds on each camera. */
+    private val tourSeconds: Int = 10,
 ) {
     var layout by mutableStateOf(initialLayout ?: defaultLayout(cameras.size))
         private set
@@ -78,6 +83,33 @@ class ViewerState(
 
     /** Camera index the grid should move focus to next (consumed by the screen). */
     var focusTarget by mutableStateOf<Int?>(cameras.firstOrNull()?.index)
+    /** The camera whose tile has focus (for the tour and picture-in-picture). */
+    var focusedIndex: Int? = null
+
+    /** Full-screen zoom: 1 (none) to 4, and the view's centre, -1..1 on each axis. */
+    var zoom by mutableIntStateOf(1)
+        private set
+    var panX by mutableFloatStateOf(0f)
+        private set
+    var panY by mutableFloatStateOf(0f)
+        private set
+
+    /** Camera tour running, and seconds until the next camera. */
+    var touring by mutableStateOf(false)
+        private set
+    var tourCountdown by mutableIntStateOf(0)
+        private set
+    private var tourJob: Job? = null
+
+    /** Opened by motion: goes back to the grid by itself unless a button is pressed. */
+    private var autoOpened = false
+    private var autoCloseJob: Job? = null
+    private var motionCooldownUntil = 0L
+    private var lastKeyAt = 0L
+
+    /** Camera playing in the picture-in-picture window, or null. */
+    var pipCamera by mutableStateOf<Camera?>(null)
+        private set
 
     private var overlayJob: Job? = null
     /** The full-screen 4K surface, once the screen has created it. */
@@ -88,6 +120,11 @@ class ViewerState(
     private var mainStartToken = 0
     /** When OK was pressed, for the open timings in the log. */
     private var openedAt = 0L
+
+    init {
+        manager.motion.clear() // camera positions may have changed
+        manager.onMotion = ::onMotion
+    }
 
     val isFullscreen: Boolean get() = fullIndex != null
     val fullCamera: Camera? get() = fullIndex?.let { cameras.getOrNull(it) }
@@ -142,6 +179,7 @@ class ViewerState(
         tileIsFullQuality = false
         mainShowing = false
         fallbackShowing = false
+        resetZoom()
         showOverlay()
     }
 
@@ -196,6 +234,7 @@ class ViewerState(
         tileIsFullQuality = false
         mainShowing = false
         fallbackShowing = false
+        resetZoom()
         val main = manager.main
         val view = mainView
         when {
@@ -209,6 +248,11 @@ class ViewerState(
     fun close() {
         val index = fullIndex ?: return
         AppLog.i("close full screen (main was ${if (mainShowing) "showing" else "not showing"})")
+        stopTour()
+        if (autoOpened) motionCooldownUntil = SystemClock.elapsedRealtime() + 60_000
+        autoOpened = false
+        autoCloseJob?.cancel()
+        resetZoom()
         manager.captureMainPicture(index)
         // Stop the full-screen streams directly rather than waiting for the screen to recompose.
         manager.stopMain()
@@ -276,7 +320,178 @@ class ViewerState(
     fun pause() {
         close()
         paused = true
+        pipCamera = null
         manager.stopAll()
+    }
+
+    // ------------------------------------------------------------------ zoom
+
+    /** ▲ (or OK when zoomed): 1× → 2× → 3× → 4× → back to 1×. */
+    fun zoomIn() {
+        // Not before full screen has set up its player (the first frame after opening).
+        if (!isFullscreen || mainView == null) return
+        userActivity()
+        stopTour()
+        // The 1-camera tile plays on a SurfaceView, which can't be scaled: move its camera
+        // to the full-screen player first (its frozen frame shows zoomed meanwhile).
+        if (tileIsFullQuality) handOverToMain()
+        zoom = if (zoom >= 4) 1 else zoom + 1
+        if (zoom == 1) resetZoom() else clampPan()
+        showOverlay()
+    }
+
+    fun resetZoom() {
+        zoom = 1
+        panX = 0f
+        panY = 0f
+    }
+
+    /** D-pad while zoomed: moves the view a quarter of the way to the edge per press. */
+    fun pan(dx: Int, dy: Int) {
+        panX += dx * 0.25f
+        panY += dy * 0.25f
+        clampPan()
+        showOverlay()
+    }
+
+    private fun clampPan() {
+        panX = panX.coerceIn(-1f, 1f)
+        panY = panY.coerceIn(-1f, 1f)
+    }
+
+    /** Back in full screen: zoom out first, then back to the grid. */
+    fun back() {
+        if (zoom > 1) {
+            resetZoom()
+            showOverlay()
+        } else {
+            close()
+        }
+    }
+
+    private fun handOverToMain() {
+        val index = expandedIndex ?: return
+        val view = mainView ?: return
+        tileIsFullQuality = false
+        mainStartPending = true
+        val token = ++mainStartToken
+        manager.freezeTile(index) {
+            if (token == mainStartToken && isFullscreen) {
+                mainStartPending = false
+                manager.releaseTileNow(index) // the 4K decoder must be free before the next start
+                expandedPlaying = false
+                fullCamera?.let { if (!paused) launchMain(it, view) }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ tour
+
+    /** Play button or ▶ Tour: each camera full screen in turn. */
+    fun toggleTour() {
+        if (touring) {
+            close()
+            return
+        }
+        if (cameras.size < 2 || paused) return
+        AppLog.i("camera tour started (${tourSeconds}s per camera)")
+        if (!isFullscreen) {
+            val start = cameras.firstOrNull { it.index == focusedIndex } ?: cameras.first()
+            open(start)
+        }
+        touring = true
+        restartTourTimer()
+    }
+
+    /** Left/right during the tour: change camera now and restart the countdown. */
+    fun stepByUser(delta: Int) {
+        step(delta)
+        if (touring) restartTourTimer()
+    }
+
+    private fun restartTourTimer() {
+        tourJob?.cancel()
+        tourJob = scope.launch {
+            while (true) {
+                for (s in tourSeconds downTo 1) {
+                    tourCountdown = s
+                    delay(1_000)
+                }
+                step(+1)
+            }
+        }
+    }
+
+    private fun stopTour() {
+        if (touring) AppLog.i("camera tour stopped")
+        touring = false
+        tourJob?.cancel()
+        tourJob = null
+    }
+
+    // ------------------------------------------------------------------ motion
+
+    private fun onMotion(cameraIndex: Int) {
+        if (!motionOpens || isFullscreen || paused || touring || pipCamera != null) return
+        val now = SystemClock.elapsedRealtime()
+        // Not while someone is using the remote, nor straight after a motion camera was closed.
+        if (now < motionCooldownUntil || now - lastKeyAt < 10_000) return
+        val camera = cameras.getOrNull(cameraIndex) ?: return
+        AppLog.i("motion: opening ${camera.name}")
+        open(camera)
+        autoOpened = true
+        autoCloseJob?.cancel()
+        autoCloseJob = scope.launch {
+            delay(30_000)
+            if (autoOpened && isFullscreen) close()
+        }
+    }
+
+    /** Any button: a camera opened by motion stays open. */
+    fun userActivity() {
+        lastKeyAt = SystemClock.elapsedRealtime()
+        if (!autoOpened) return
+        autoOpened = false
+        autoCloseJob?.cancel()
+    }
+
+    // ------------------------------------------------------------------ picture-in-picture
+
+    /**
+     * Home pressed: show one camera in the small window, on its light grid stream without
+     * sound. Everything else stops first (the 4K stream must never overlap another decoder).
+     */
+    fun enterPip(): Boolean {
+        val camera = fullCamera ?: cameras.firstOrNull { it.index == focusedIndex } ?: cameras.firstOrNull() ?: return false
+        if (camera.subUrl == camera.mainUrl) {
+            // No light stream: a 4K picture in the corner could stop other apps' video.
+            AppLog.i("picture-in-picture skipped: ${camera.name} has no grid stream")
+            return false
+        }
+        AppLog.i("picture-in-picture: ${camera.name}")
+        close()
+        paused = true
+        manager.stopAll()
+        manager.resume() // keeps the health checks running for the small window
+        pipCamera = camera
+        return true
+    }
+
+    /** The TV refused the small window: stay stopped, as if Home had been pressed without it. */
+    fun cancelPip() {
+        pipCamera = null
+        manager.stopAll()
+    }
+
+    /** Back from the small window to the full app. */
+    fun exitPip() {
+        val camera = pipCamera ?: return
+        AppLog.i("picture-in-picture closed, back to the grid")
+        manager.stopPipNow() // its decoder must be closed before the grid (maybe 4K) starts
+        pipCamera = null
+        page = (camera.index / layout.cells).coerceIn(0, pageCount - 1)
+        focusTarget = camera.index
+        resume()
     }
 
     fun resume() {

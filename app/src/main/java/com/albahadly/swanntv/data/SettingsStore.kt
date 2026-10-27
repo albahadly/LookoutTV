@@ -28,12 +28,24 @@ data class CameraConfig(
 /** Grid layout preference; AUTO picks by camera count. */
 enum class LayoutPreference { AUTO, ONE, FOUR, NINE }
 
+/** What the viewer does when it sees movement on a grid camera. */
+enum class MotionMode { OFF, HIGHLIGHT, OPEN }
+
+/** How much of the picture must change to count as movement. */
+enum class MotionSensitivity(val changedFraction: Float) { LOW(0.06f), MEDIUM(0.03f), HIGH(0.015f) }
+
 data class AppSettings(
     val cameras: List<CameraConfig> = emptyList(),
     val layout: LayoutPreference = LayoutPreference.AUTO,
     /** SHA-256 of the PIN (with a per-install salt), or empty when no PIN is set. */
     val pinHash: String = "",
     val pinSalt: String = "",
+    /** Home pressed while watching: keep the camera playing in a small window. */
+    val pictureInPicture: Boolean = false,
+    val motionMode: MotionMode = MotionMode.HIGHLIGHT,
+    val motionSensitivity: MotionSensitivity = MotionSensitivity.MEDIUM,
+    /** Camera tour: seconds on each camera. */
+    val tourSeconds: Int = 10,
 ) {
     val hasPin: Boolean get() = pinHash.isNotEmpty()
 
@@ -96,6 +108,10 @@ class SettingsStore(context: Context) {
             .put("layout", settings.layout.name)
             .put("pinHash", settings.pinHash)
             .put("pinSalt", settings.pinSalt)
+            .put("pictureInPicture", settings.pictureInPicture)
+            .put("motionMode", settings.motionMode.name)
+            .put("motionSensitivity", settings.motionSensitivity.name)
+            .put("tourSeconds", settings.tourSeconds)
             .put("cameras", JSONArray().apply {
                 settings.cameras.forEach { c ->
                     put(JSONObject()
@@ -159,6 +175,11 @@ class SettingsStore(context: Context) {
                 .getOrDefault(LayoutPreference.AUTO),
             pinHash = json.optString("pinHash"),
             pinSalt = json.optString("pinSalt"),
+            pictureInPicture = json.optBoolean("pictureInPicture", false),
+            motionMode = runCatching { MotionMode.valueOf(json.optString("motionMode")) }.getOrDefault(MotionMode.HIGHLIGHT),
+            motionSensitivity = runCatching { MotionSensitivity.valueOf(json.optString("motionSensitivity")) }
+                .getOrDefault(MotionSensitivity.MEDIUM),
+            tourSeconds = json.optInt("tourSeconds", 10).coerceIn(3, 120),
         )
     }
 
