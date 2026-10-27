@@ -149,8 +149,14 @@ fun SettingsScreen(app: AppController) {
                     selected = p == pane && editing == null && editingGroup == null && !nvrOpen,
                     modifier = Modifier.focusRequester(paneFocus.getValue(p)),
                 ) {
-                    // Moving onto the menu while a form is open must not throw away what was typed.
-                    if (editing == null && editingGroup == null && !nvrOpen) pane = p
+                    // Pressing OK on a menu item while a form is open closes the form (unsaved
+                    // changes are dropped, as with Back) and shows that section. Only focus
+                    // moving onto the menu leaves a form alone.
+                    editing = null
+                    editingGroup = null
+                    nvrOpen = false
+                    returnToList = false
+                    pane = p
                 }
             }
         }
