@@ -55,14 +55,16 @@ fun CameraTile(
 ) {
     val fullscreen = state.isFullscreen
     val active = state.isTileActive(camera.index)
+    // The 1-camera layout plays the full-quality stream: it fills the screen anyway.
+    val fullQuality = state.layout == GridLayout.ONE
     var surfaceView by remember { mutableStateOf<SurfaceView?>(null) }
     var player by remember { mutableStateOf<StreamPlayer?>(null) }
     var focused by remember { mutableStateOf(false) }
 
     // The stream runs exactly while the tile is active and its surface exists.
-    DisposableEffect(surfaceView, active, state.session) {
+    DisposableEffect(surfaceView, active, state.session, fullQuality) {
         val view = surfaceView
-        if (view != null && active) player = state.manager.attachTile(camera, view)
+        if (view != null && active) player = state.manager.attachTile(camera, view, fullQuality)
         onDispose {
             if (view != null && active) {
                 state.manager.detachTile(camera.index)

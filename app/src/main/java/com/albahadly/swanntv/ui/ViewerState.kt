@@ -60,6 +60,12 @@ class ViewerState(
         private set
     var mainShowing by mutableStateOf(false)
         private set
+    /**
+     * Opened from the 1-camera layout, whose tile already plays the full-quality stream: the
+     * tile simply stays on screen (no second stream, no quality change) until left/right.
+     */
+    var tileIsFullQuality by mutableStateOf(false)
+        private set
     var fallbackShowing by mutableStateOf(false)
         private set
     var overlayVisible by mutableStateOf(false)
@@ -133,6 +139,7 @@ class ViewerState(
         fullIndex = camera.index
         expandedIndex = camera.index
         expandedPlaying = true
+        tileIsFullQuality = false
         mainShowing = false
         fallbackShowing = false
         showOverlay()
@@ -146,8 +153,13 @@ class ViewerState(
         // failures jammed it until a power cycle). So the 4K stream always starts alone:
         // free the other tiles, freeze the enlarged tile's current frame, release it, then start.
         mainView = view
-        manager.releaseTilesExcept(expandedIndex)
         val tileIndex = expandedIndex
+        if (tileIndex != null && manager.fullQualityTile(tileIndex) != null) {
+            tileIsFullQuality = true
+            AppLog.i("${camera.name} already in full quality: keeping its stream")
+            return
+        }
+        manager.releaseTilesExcept(expandedIndex)
         mainStartPending = true
         val token = ++mainStartToken
         val begin = begin@{
@@ -181,6 +193,7 @@ class ViewerState(
         // must run alone on this TV.
         expandedIndex?.let { manager.releaseTileNow(it) }
         expandedPlaying = false
+        tileIsFullQuality = false
         mainShowing = false
         fallbackShowing = false
         val main = manager.main
@@ -206,6 +219,7 @@ class ViewerState(
         fullIndex = null
         expandedIndex = null
         expandedPlaying = false
+        tileIsFullQuality = false
         mainShowing = false
         fallbackShowing = false
         overlayJob?.cancel()

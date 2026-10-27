@@ -301,7 +301,9 @@ private fun FallbackStream(state: ViewerState, camera: Camera) {
 private fun FullscreenOverlay(state: ViewerState, camera: Camera) {
     val cameras = state.cameras
     val main = state.manager.main
+    val fullTile = if (state.tileIsFullQuality) state.manager.fullQualityTile(camera.index) else null
     val quality = when {
+        fullTile != null -> if (fullTile.isLive) qualityLabel(fullTile.resolution) else "Loading full quality…"
         state.mainShowing && main != null -> qualityLabel(main.resolution)
         main == null -> "Starting full quality…"
         else -> when (main.status) {

@@ -52,6 +52,9 @@ class PlaybackManager(private val context: Context) {
     private var stopDetachedUntil = 0L
     private val pictureTakenAt = HashMap<Int, Long>()
 
+    /** Tiles playing the full-quality main stream (the 1-camera layout). */
+    private val fullQuality = HashSet<StreamPlayer>()
+
     /** Every player created and not yet released. */
     private val alive = LinkedHashSet<StreamPlayer>()
     /** Players handed to [releaseLater] (not orphans, just waiting a frame), with when. */
@@ -77,18 +80,37 @@ class PlaybackManager(private val context: Context) {
 
     // ------------------------------------------------------------------ grid tiles
 
-    fun attachTile(camera: Camera, view: SurfaceView): StreamPlayer {
+    /**
+     * Plays [camera] on a grid tile: its grid stream, or with [full] (the 1-camera layout) its
+     * full-quality main stream with sound. A full-quality stream always starts alone: every
+     * other tile, parked or pending stream is released first (the TCL's 4K decoder fails, and
+     * can jam, if another decoder is still open).
+     */
+    fun attachTile(camera: Camera, view: SurfaceView, full: Boolean = false): StreamPlayer {
         tiles[camera.index]?.let { existing ->
-            if (existing.view !== view) existing.retarget(view)
-            return existing
+            if ((existing in fullQuality) == full) {
+                if (existing.view !== view) existing.retarget(view)
+                return existing
+            }
+            tiles.remove(camera.index)
+            releaseNow(existing) // wrong quality for this layout
         }
         parked.remove(camera.index)?.let { player ->
             pendingRelease -= player
-            if (!player.isReleased) {
+            if (!player.isReleased && (player in fullQuality) == full) {
                 player.retarget(view)
                 tiles[camera.index] = player
                 AppLog.i("${player.debugName} kept running on its new view")
                 return player
+            }
+            releaseNow(player)
+        }
+        if (full) {
+            releaseTilesExcept(null)
+            return newPlayer(camera.mainUrl, "${camera.name} full", camera.useTcp, withAudio = true).also {
+                fullQuality += it
+                it.start(view)
+                tiles[camera.index] = it
             }
         }
         return newPlayer(camera.subUrl, "${camera.name} sub", camera.useTcp).also {
@@ -96,6 +118,9 @@ class PlaybackManager(private val context: Context) {
             tiles[camera.index] = it
         }
     }
+
+    /** The tile's player if it is playing the full-quality stream, else null. */
+    fun fullQualityTile(cameraIndex: Int): StreamPlayer? = tiles[cameraIndex]?.takeIf { it in fullQuality }
 
     /**
      * A page or layout change is coming: the tiles about to be detached won't come back, so
@@ -109,7 +134,9 @@ class PlaybackManager(private val context: Context) {
     fun detachTile(cameraIndex: Int) {
         val player = tiles.remove(cameraIndex) ?: return
         if (SystemClock.elapsedRealtime() < stopDetachedUntil) {
-            releaseLater(player) // stops now, releases after the frame
+            // Page or layout change. A full-quality stream is released at once, so its 4K
+            // decoder is closed before the next streams start; others after the frame.
+            if (player in fullQuality) releaseNow(player) else releaseLater(player)
             return
         }
         parked.remove(cameraIndex)?.let { releaseNow(it) }
@@ -242,6 +269,7 @@ class PlaybackManager(private val context: Context) {
         pause()
         tiles.clear()
         parked.clear()
+        fullQuality.clear()
         main = null
         fallback = null
         alive.toList().forEach { releaseNow(it) }
@@ -258,6 +286,7 @@ class PlaybackManager(private val context: Context) {
     private fun releaseNow(player: StreamPlayer) {
         pendingRelease -= player
         parked.values.remove(player)
+        fullQuality -= player
         alive -= player
         player.release()
     }

@@ -3,6 +3,7 @@
 An Android TV app for watching RTSP security cameras — built for a Swann NVR on a TCL Google TV, but it works with any camera that has an RTSP stream.
 
 - **Live grid** of up to 9 cameras (1, 2×2 or 3×3), with a second page for cameras 10–16.
+- **1-camera view in full quality**: with one camera on screen it plays the main (4K) stream with sound; flipping cameras stops the old stream first, so the TV's 4K decoder never runs twice.
 - **Settings on the TV**: add a whole NVR in one step or single cameras, test them, reorder, hide, rename; optional PIN lock.
 - **Phone setup**: scan a QR code in Settings and do the same from your phone's browser, plus backup and restore.
 - **Instant full screen**: the tile fills the screen in under 0.2 s, then the full-quality (4K) stream takes over within a second, with the camera's sound (the grid stays silent).
