@@ -207,6 +207,8 @@ nvr.subPath=/rtsp/streaming?channel={ch}&subtype=1
 
 **Deploying from a command line:** `./gradlew :app:assembleRelease` then `adb install -r app/build/outputs/apk/release/app-release.apk`.
 
+**Publishing a release.** Bump `versionName` (and `versionCode`) in `app/build.gradle.kts`, add a section to `CHANGELOG.md`, push, then on GitHub open **Actions → Release → Run workflow**. The workflow builds the APK, creates the tag `v<version>` and publishes a release with the APK and its checksum attached, using the changelog section as notes. It signs with the repository secret `DEBUG_KEYSTORE_BASE64` (the project's `debug.keystore` as base64), so the published APK installs over the copy on the TV; set that secret once under Settings → Secrets and variables → Actions.
+
 **The probe module** is a separate test app that measures what a TV can decode (decoders, 4/9/16-tile load, full-screen switch times) and writes `probe-log.txt` to its files folder. It reads `nvr.password` from `local.properties` and compiles it into its APK as plain text, so never share a probe build; its camera list is fixed to four Swann channels in `ProbeConfig.kt`.
 
 ## How it works on the TV
