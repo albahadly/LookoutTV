@@ -16,11 +16,30 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Grid layouts. 3x3 is the maximum: the TCL 55C6L can't play 16 live streams smoothly. */
+/**
+ * Grid layouts. 3x3 is the maximum: the TCL 55C6L can't play 16 live streams smoothly.
+ * SIX is one big tile (slot 0, two thirds of the width) with five small ones around it.
+ */
 enum class GridLayout(val cells: Int, val columns: Int, val label: String) {
     ONE(1, 1, "1"),
     FOUR(4, 2, "2×2"),
+    SIX(6, 3, "1+5"),
     NINE(9, 3, "3×3"),
+    ;
+
+    /** Slots on the left edge of the grid (◀ there goes to the previous page). */
+    fun isLeftEdge(slot: Int): Boolean = if (this == SIX) slot == 0 || slot == 3 else slot % columns == 0
+
+    /** Slots on the right edge (▶ there goes to the next page). */
+    fun isRightEdge(slot: Int, lastSlot: Int): Boolean =
+        if (this == SIX) slot == 1 || slot == 2 || slot == 5 || slot == lastSlot
+        else slot % columns == columns - 1 || slot == lastSlot
+
+    /** Where to land on the next page when leaving [slot] to the right: the same row's first slot. */
+    fun nextPageSlot(slot: Int): Int = if (this == SIX) (if (slot == 5) 3 else 0) else slot - slot % columns
+
+    /** Where to land on the previous page when leaving [slot] to the left: the same row's last slot. */
+    fun previousPageSlot(slot: Int): Int = if (this == SIX) (if (slot == 3) 5 else 1) else slot - slot % columns + columns - 1
 }
 
 /**
@@ -45,6 +64,10 @@ class ViewerState(
     private val motionOpens: Boolean = false,
     /** Camera tour: seconds on each camera. */
     private val tourSeconds: Int = 10,
+    /** The group shown (null = all cameras), how many groups exist, and how to move to the next. */
+    val groupName: String? = null,
+    val groupCount: Int = 0,
+    private val onNextGroup: () -> Unit = {},
 ) {
     var layout by mutableStateOf(initialLayout ?: defaultLayout(cameras.size))
         private set
@@ -118,6 +141,13 @@ class ViewerState(
     init {
         manager.motion.clear() // camera positions may have changed
         manager.onMotion = ::onMotion
+        syncListening()
+    }
+
+    /** Group chip in the header: show the next group (All → first → … → All). */
+    fun nextGroup() {
+        manager.stopDetachedTilesSoon() // the tiles about to change camera must not be reused
+        onNextGroup()
     }
 
     val isFullscreen: Boolean get() = fullIndex != null
@@ -139,6 +169,27 @@ class ViewerState(
         onLayoutChanged(newLayout)
         page = (keep / newLayout.cells).coerceIn(0, pageCount - 1)
         focusTarget = keep
+        syncListening()
+    }
+
+    /**
+     * Sound in the grid: the 1-camera layout always plays its camera's sound; otherwise sound
+     * stays on the tile it was turned on for while that tile is on screen.
+     */
+    private fun syncListening() {
+        val visible = visibleCameras.map { it.index }
+        when {
+            layout == GridLayout.ONE -> manager.listenTo(visible.firstOrNull())
+            manager.listening !in visible -> manager.listenTo(null)
+        }
+    }
+
+    /** 0 key or a long press on OK: sound on/off for the selected tile. */
+    fun toggleSound() {
+        if (isFullscreen) return
+        val target = focusedIndex?.takeIf { it in visibleCameras.map { c -> c.index } }
+            ?: visibleCameras.firstOrNull()?.index ?: return
+        manager.listenTo(if (manager.listening == target) null else target)
     }
 
     fun nextPage(focusSlot: Int = 0) = goToPage(page + 1, focusSlot)
@@ -151,6 +202,7 @@ class ViewerState(
         page = newPage
         val cams = visibleCameras
         focusTarget = cams.getOrNull(focusSlot.coerceAtMost(cams.lastIndex))?.index
+        syncListening()
     }
 
     /** Number keys 1–9: open that tile of the current page. */
@@ -187,6 +239,7 @@ class ViewerState(
         val tileIndex = expandedIndex
         if (tileIndex != null && manager.fullQualityTile(tileIndex) != null) {
             tileIsFullQuality = true
+            manager.listenTo(tileIndex) // full screen always has sound
             AppLog.i("${camera.name} already in full quality: keeping its stream")
             return
         }
@@ -216,7 +269,22 @@ class ViewerState(
     fun step(delta: Int) {
         val current = fullIndex ?: return
         if (cameras.size < 2) return
-        val next = (current + delta).mod(cameras.size)
+        jumpTo((current + delta).mod(cameras.size))
+    }
+
+    /** Shows [index] (from the phone): opens it from the grid, or switches to it in full screen. */
+    fun showCamera(index: Int) {
+        val camera = cameras.getOrNull(index) ?: return
+        userActivity()
+        if (!isFullscreen) {
+            open(camera)
+        } else if (index != fullIndex) {
+            stopTour()
+            jumpTo(index)
+        }
+    }
+
+    private fun jumpTo(next: Int) {
         AppLog.i("step to ${cameras[next].name}")
         fullIndex = next
         // The previous camera's picture must not linger: drop the tile and show the new camera's
@@ -261,6 +329,7 @@ class ViewerState(
         // After left/right the camera may be on another page: go there, then focus it.
         page = (index / layout.cells).coerceIn(0, pageCount - 1)
         focusTarget = index
+        syncListening()
     }
 
     private fun onMainReady() {
@@ -445,7 +514,7 @@ class ViewerState(
      * (from the grid, Home just leaves). It must have a light grid stream: a 4K picture
      * floating over other apps could stop their video on this TV.
      */
-    fun floatingCandidate(): Camera? = fullCamera?.takeIf { it.subUrl != it.mainUrl }
+    fun floatingCandidate(): Camera? = fullCamera?.takeIf { it.hasSubStream }
 
     fun resume() {
         // Only after a real pause: bumping on first start restarted every tile once for nothing.
@@ -458,6 +527,7 @@ class ViewerState(
         fun defaultLayout(count: Int) = when {
             count <= 1 -> GridLayout.ONE
             count <= 4 -> GridLayout.FOUR
+            count <= 6 -> GridLayout.SIX
             else -> GridLayout.NINE
         }
     }

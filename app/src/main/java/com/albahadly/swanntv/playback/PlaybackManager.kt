@@ -9,7 +9,12 @@ import android.view.Choreographer
 import android.view.PixelCopy
 import android.view.SurfaceView
 import android.view.TextureView
+import android.media.AudioManager
+import android.media.ToneGenerator
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.albahadly.swanntv.AppLog
@@ -49,19 +54,37 @@ class PlaybackManager(private val context: Context) {
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private val tiles = HashMap<Int, StreamPlayer>()
+    /** Playing grid tiles by camera index. Observable: tiles redraw when their player changes. */
+    val tiles = mutableStateMapOf<Int, StreamPlayer>()
+    /** The camera each attached tile shows (for motion settings and restarts). */
+    private val tileCameras = HashMap<Int, Camera>()
     /**
      * Tiles just detached, kept running for a moment. Compose sometimes recreates a tile's view
      * (which detaches and re-attaches it); a parked stream is handed to the new view instead
      * of opening a second RTSP session. Released after two frames if nobody takes it back.
      */
     private val parked = HashMap<Int, StreamPlayer>()
+    /** Which camera each parked player shows: only that camera may take it back. */
+    private val parkedCameras = HashMap<Int, Camera>()
     /** Until this time, detached tiles are stopped at once instead of parked (page change). */
     private var stopDetachedUntil = 0L
     private val pictureTakenAt = HashMap<Int, Long>()
 
-    /** Tiles playing the full-quality main stream (the 1-camera layout). */
+    /** Tiles playing the full-quality main stream. */
     private val fullQuality = HashSet<StreamPlayer>()
+    /**
+     * Tiles waiting for a full-quality (4K) tile to get going first: on this TV the 4K decoder
+     * must start alone, so the others start once it shows a frame (or fails, or 5 s pass).
+     */
+    private val waiting = LinkedHashMap<Int, Pair<Camera, SurfaceView>>()
+    private var fullStarting: StreamPlayer? = null
+    private val fullStartTimeout = Runnable { startWaiting("after 5 s") }
+    /** Cameras (by id) whose 4K stream failed in the grid this session: back to the grid stream for them. */
+    private val downgraded = HashSet<String>()
+
+    /** The grid tile whose sound is on (camera index), or null. Observable. */
+    var listening by mutableStateOf<Int?>(null)
+        private set
 
     /** Every player created and not yet released. */
     private val alive = LinkedHashSet<StreamPlayer>()
@@ -73,16 +96,11 @@ class PlaybackManager(private val context: Context) {
 
     /** Cameras where movement was seen recently (camera index -> when), shown on their tiles. */
     val motion = mutableStateMapOf<Int, Long>()
-    /** Motion detection threshold (fraction of the picture), or null when it's off. */
-    var motionThreshold: Float? = null
-        set(value) {
-            field = value
-            if (value == null) { motion.clear(); motionLast.clear(); motionHits.clear() }
-        }
     /** Main thread: movement just started on this camera's tile. */
     var onMotion: ((Int) -> Unit)? = null
     private val motionLast = HashMap<StreamPlayer, IntArray>()
     private val motionHits = HashMap<StreamPlayer, Int>()
+    private var toneGenerator: ToneGenerator? = null
 
     var main: StreamPlayer? = null
         private set
@@ -100,42 +118,108 @@ class PlaybackManager(private val context: Context) {
     // ------------------------------------------------------------------ grid tiles
 
     /**
-     * Plays [camera] on a grid tile: its grid stream, or with [full] (the 1-camera layout) its
-     * full-quality main stream with sound. A full-quality stream always starts alone: every
-     * other tile, parked or pending stream is released first (the TCL's 4K decoder fails, and
-     * can jam, if another decoder is still open).
+     * Plays [camera] on a grid tile: its grid stream, or with [full] its full-quality main
+     * stream. A full-quality stream always starts alone: every other tile is released first
+     * and restarted once the 4K stream is up (the TCL's 4K decoder fails, and can jam, if
+     * another decoder is open when it starts). One full-quality tile per grid; a second
+     * request for one plays the grid stream instead.
      */
-    fun attachTile(camera: Camera, view: SurfaceView, full: Boolean = false): StreamPlayer {
+    fun attachTile(camera: Camera, view: SurfaceView, full: Boolean = false) {
+        tileCameras[camera.index] = camera
+        val wantFull = full && camera.id !in downgraded && (fullQuality.isEmpty() || tiles[camera.index] in fullQuality)
         tiles[camera.index]?.let { existing ->
-            if ((existing in fullQuality) == full) {
+            if ((existing in fullQuality) == wantFull) {
                 if (existing.view !== view) existing.retarget(view)
-                return existing
+                return
             }
             tiles.remove(camera.index)
             releaseNow(existing) // wrong quality for this layout
         }
         parked.remove(camera.index)?.let { player ->
             pendingRelease -= player
-            if (!player.isReleased && (player in fullQuality) == full) {
+            val sameCamera = parkedCameras.remove(camera.index) == camera // same URLs: a group change may put another camera here
+            if (!player.isReleased && sameCamera && (player in fullQuality) == wantFull) {
                 player.retarget(view)
                 tiles[camera.index] = player
                 AppLog.i("${player.debugName} kept running on its new view")
-                return player
+                return
             }
             releaseNow(player)
         }
-        if (full) {
-            releaseTilesExcept(null)
-            return newPlayer(camera.mainUrl, "${camera.name} full", camera.useTcp, withAudio = true).also {
-                fullQuality += it
-                it.start(view)
-                tiles[camera.index] = it
-            }
+        if (wantFull) {
+            startFullTile(camera, view)
+            return
         }
-        return newPlayer(camera.subUrl, "${camera.name} sub", camera.useTcp).also {
+        if (fullStarting != null) {
+            waiting[camera.index] = camera to view // the 4K tile goes first
+            handler.removeCallbacks(fullStartTimeout)
+            handler.postDelayed(fullStartTimeout, 5_000) // never wait for a 4K stream that sends nothing
+            return
+        }
+        startSubTile(camera, view)
+    }
+
+    private fun startSubTile(camera: Camera, view: SurfaceView) {
+        newPlayer(camera.subUrl, "${camera.name} sub", camera.useTcp, withAudio = listening == camera.index).also {
             it.start(view)
             tiles[camera.index] = it
         }
+    }
+
+    private fun startFullTile(camera: Camera, view: SurfaceView) {
+        // Everything else waits: remembered with its view, released, restarted after the 4K start.
+        tiles.filterKeys { it != camera.index }.forEach { (index, player) ->
+            val otherView = player.view as? SurfaceView
+            val otherCamera = tileCameras[index]
+            if (otherView != null && otherCamera != null) waiting[index] = otherCamera to otherView
+        }
+        releaseTilesExcept(null)
+        handler.removeCallbacks(fullStartTimeout)
+        val player = newPlayer(camera.mainUrl, "${camera.name} full", camera.useTcp, withAudio = listening == camera.index)
+        fullQuality += player
+        fullStarting = player
+        player.onFirstFrame = { if (fullStarting === player) startWaiting("4K tile is up") }
+        player.onError = {
+            if (fullStarting === player || tiles[camera.index] === player) {
+                val error = player.lastError
+                if (error.startsWith("DECOD") && tiles.size + waiting.size > 1) {
+                    // The 4K decoder can't run next to the other tiles on this TV: this camera
+                    // goes back to its grid stream for the rest of the session.
+                    AppLog.w("${camera.name}: 4K in the grid failed ($error); using its grid stream instead")
+                    downgraded += camera.id
+                    val v = player.view as? SurfaceView
+                    tiles.remove(camera.index)
+                    releaseNow(player)
+                    if (fullStarting === player) fullStarting = null
+                    if (v != null) startSubTile(camera, v)
+                    startWaiting("4K tile failed")
+                } else if (fullStarting === player) {
+                    startWaiting("4K tile failed")
+                }
+            }
+        }
+        player.start(view)
+        tiles[camera.index] = player
+        if (waiting.isNotEmpty()) handler.postDelayed(fullStartTimeout, 5_000)
+    }
+
+    /** Starts the tiles that waited for the full-quality tile. */
+    private fun startWaiting(why: String) {
+        handler.removeCallbacks(fullStartTimeout)
+        fullStarting = null
+        if (waiting.isEmpty()) return
+        AppLog.i("starting ${waiting.size} waiting tile(s): $why")
+        val toStart = waiting.values.toList()
+        waiting.clear()
+        toStart.forEach { (camera, view) -> if (tiles[camera.index] == null) startSubTile(camera, view) }
+    }
+
+    /** Sound on for one grid tile (its camera index), or off for all with null. */
+    fun listenTo(cameraIndex: Int?) {
+        if (listening == cameraIndex) return
+        listening?.let { tiles[it]?.setAudioEnabled(false) }
+        listening = cameraIndex
+        cameraIndex?.let { tiles[it]?.setAudioEnabled(true) }
     }
 
     /** The tile's player if it is playing the full-quality stream, else null. */
@@ -151,7 +235,13 @@ class PlaybackManager(private val context: Context) {
     }
 
     fun detachTile(cameraIndex: Int) {
-        val player = tiles.remove(cameraIndex) ?: return
+        waiting.remove(cameraIndex)
+        val player = tiles.remove(cameraIndex)
+        if (player == null) {
+            tileCameras.remove(cameraIndex)
+            return
+        }
+        if (fullStarting === player) startWaiting("4K tile detached")
         if (SystemClock.elapsedRealtime() < stopDetachedUntil) {
             // Page or layout change. A full-quality stream is released at once, so its 4K
             // decoder is closed before the next streams start; others after the frame.
@@ -160,6 +250,7 @@ class PlaybackManager(private val context: Context) {
         }
         parked.remove(cameraIndex)?.let { releaseNow(it) }
         parked[cameraIndex] = player
+        tileCameras[cameraIndex]?.let { parkedCameras[cameraIndex] = it }
         pendingRelease[player] = SystemClock.elapsedRealtime()
         val releaseIfStillParked = {
             if (parked[cameraIndex] === player) releaseNow(player)
@@ -169,6 +260,7 @@ class PlaybackManager(private val context: Context) {
             choreographer.postFrameCallback { handler.post { releaseIfStillParked() } }
         }
         handler.postDelayed({ releaseIfStillParked() }, 400)
+        tileCameras.remove(cameraIndex)
     }
 
     /** Releases every tile except [keepIndex] now, plus anything waiting, so decoders are free. */
@@ -179,6 +271,10 @@ class PlaybackManager(private val context: Context) {
             releaseNow(player)
         }
         pendingRelease.keys.toList().forEach { releaseNow(it) }
+        // Nothing may start later behind the 4K stream either.
+        handler.removeCallbacks(fullStartTimeout)
+        waiting.keys.retainAll { it == keepIndex }
+        if (fullStarting != null && fullStarting !== tiles[keepIndex]) fullStarting = null
     }
 
     /**
@@ -217,6 +313,7 @@ class PlaybackManager(private val context: Context) {
 
     /** Releases the tile for [cameraIndex] now (used when the main stream needs its decoder). */
     fun releaseTileNow(cameraIndex: Int) {
+        waiting.remove(cameraIndex)
         tiles.remove(cameraIndex)?.let { releaseNow(it) }
     }
 
@@ -276,8 +373,13 @@ class PlaybackManager(private val context: Context) {
      */
     fun stopAll() {
         pause()
+        handler.removeCallbacks(fullStartTimeout)
         tiles.clear()
+        tileCameras.clear()
+        waiting.clear()
+        fullStarting = null
         parked.clear()
+        parkedCameras.clear()
         fullQuality.clear()
         main = null
         alive.toList().forEach { releaseNow(it) }
@@ -293,7 +395,7 @@ class PlaybackManager(private val context: Context) {
 
     private fun releaseNow(player: StreamPlayer) {
         pendingRelease -= player
-        parked.values.remove(player)
+        parked.entries.firstOrNull { it.value === player }?.key?.let { parked.remove(it); parkedCameras.remove(it) }
         fullQuality -= player
         motionLast -= player
         motionHits -= player
@@ -334,13 +436,14 @@ class PlaybackManager(private val context: Context) {
         ticks++
         sweep()
         val now = SystemClock.elapsedRealtime()
-        val threshold = motionThreshold
+        listening?.let { index -> if (tiles[index]?.hasAudio == false) listening = null } // sound couldn't be played
         for ((index, player) in tiles) {
             player.tick()
             val takenAt = pictureTakenAt[index]
             if (player.isLive && (takenAt == null || now - takenAt >= PICTURE_EVERY_MS)) {
                 captureTile(index, player)
             }
+            val threshold = tileCameras[index]?.motionThreshold
             if (threshold != null) {
                 if (player.isLive) checkMotion(index, player, threshold) else motionLast -= player
             }
@@ -392,7 +495,17 @@ class PlaybackManager(private val context: Context) {
         if (since == null || now - since > MOTION_SHOW_MS / 2) motion[index] = now
         if (since == null) {
             AppLog.i("motion on ${player.debugName} (${(fraction * 100).toInt()}% of the picture)")
+            if (tileCameras[index]?.motionBeep == true) beep()
             onMotion?.invoke(index)
+        }
+    }
+
+    private fun beep() {
+        try {
+            val tones = toneGenerator ?: ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80).also { toneGenerator = it }
+            tones.startTone(ToneGenerator.TONE_PROP_BEEP2, 200)
+        } catch (e: RuntimeException) {
+            AppLog.w("motion beep failed: ${e.message}")
         }
     }
 

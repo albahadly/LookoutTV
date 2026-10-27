@@ -56,6 +56,19 @@
   </section>
 
   <div id="app" class="hidden-el" style="display:flex;flex-direction:column;gap:20px">
+  <section id="tv-section">
+    <h2>TV</h2>
+    <p class="sub">Control what the TV shows. "Show" on a camera opens it full screen.</p>
+    <div class="row">
+      <button id="tv-grid" type="button">Grid</button>
+      <button id="tv-prev" type="button" aria-label="Previous camera">◀</button>
+      <button id="tv-next" type="button" aria-label="Next camera">▶</button>
+      <button id="tv-tour" type="button">▶ Tour</button>
+      <select id="tv-group" aria-label="Camera group" style="width:auto;flex:1 1 140px"></select>
+    </div>
+    <p class="msg" id="tv-msg" role="status"></p>
+  </section>
+
   <section id="list-section">
     <h2>Cameras</h2>
     <p class="sub" id="count">Changes appear on the TV straight away.</p>
@@ -82,6 +95,13 @@
     <label for="f-tcp">Connection</label>
     <select id="f-tcp"><option value="1">TCP (reliable)</option><option value="0">UDP</option></select>
     <label class="check"><input id="f-enabled" type="checkbox" checked> Show in the grid</label>
+    <label class="check"><input id="f-full" type="checkbox"> Always full quality in the grid (2×2 and 1+5; one camera per page)</label>
+    <label for="f-motion">Motion detection for this camera</label>
+    <select id="f-motion">
+      <option value="DEFAULT">As in the TV's Viewing settings</option><option value="OFF">Off</option>
+      <option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option>
+    </select>
+    <label class="check"><input id="f-beep" type="checkbox"> Beep on the TV when this camera sees movement</label>
     <p class="msg" id="form-msg" role="status"></p>
     <div class="row">
       <button id="test-main" type="button">Test main</button>
@@ -114,11 +134,32 @@
     </div>
   </section>
 
+  <section id="groups-section">
+    <h2>Groups</h2>
+    <p class="sub">A group shows only some cameras in the grid. Switch groups with the TV's group chip, or the TV section above.</p>
+    <div class="row"><button id="group-add" type="button">Add group</button></div>
+    <div id="groups"></div>
+  </section>
+
+  <section id="group-form" class="hidden-el" aria-labelledby="group-title">
+    <h2 id="group-title">Add group</h2>
+    <label for="g-name">Name</label>
+    <input id="g-name" type="text" placeholder="Front" autocomplete="off">
+    <p class="sub" style="margin-top:12px">Cameras in this group:</p>
+    <div id="g-cameras"></div>
+    <p class="msg" id="group-msg" role="status"></p>
+    <div class="row">
+      <button class="primary" id="group-save" type="button">Save</button>
+      <button id="group-cancel" type="button">Cancel</button>
+      <button class="danger" id="group-delete" type="button">Delete</button>
+    </div>
+  </section>
+
   <section>
     <h2>Grid layout</h2>
     <p class="sub">How the cameras are arranged when the TV app opens. At most 9 play at once.</p>
     <select id="layout" aria-label="Grid layout">
-      <option value="AUTO">Automatic</option><option value="ONE">1</option><option value="FOUR">2×2</option><option value="NINE">3×3</option>
+      <option value="AUTO">Automatic</option><option value="ONE">1</option><option value="FOUR">2×2</option><option value="SIX">1+5</option><option value="NINE">3×3</option>
     </select>
   </section>
 
@@ -133,6 +174,17 @@
     </div>
     <label class="check"><input id="i-replace" type="checkbox"> Loading replaces my existing cameras</label>
     <p class="msg" id="backup-msg" role="status"></p>
+  </section>
+
+  <section>
+    <h2>Diagnostics</h2>
+    <p class="sub">The TV app's log, newest at the bottom. Logins are never in it.</p>
+    <div class="row">
+      <button id="log-show" type="button">Show log</button>
+      <button id="log-download" type="button">Download log</button>
+    </div>
+    <pre id="log" class="hidden-el" style="margin-top:10px;max-height:50vh;overflow:auto;font-size:11px;line-height:1.35;background:var(--tile);border:1px solid var(--border);border-radius:8px;padding:10px;white-space:pre-wrap;word-break:break-word"></pre>
+    <p class="msg" id="log-msg" role="status"></p>
   </section>
 
   </div>
@@ -150,8 +202,8 @@ let token = (() => {
   return t;
 })();
 const $ = id => document.getElementById(id);
-let state = { cameras: [], max: 16, presets: [], layout: "AUTO" };
-let editing = null; // camera being edited, or {} for a new one
+let state = { cameras: [], max: 16, presets: [], layout: "AUTO", groups: [], currentGroupId: "", maxGroups: 8 };
+let editing = null; // camera or group being edited, or {} for a new one
 
 async function api(path, body) {
   const res = await fetch("/api" + path, {
@@ -184,9 +236,12 @@ function render() {
   const list = $("cameras");
   list.replaceChildren();
   const full = state.cameras.length >= state.max;
-  $("add-btn").disabled = full;
-  $("nvr-btn").disabled = full;
-  $("count").textContent = state.cameras.length + " of " + state.max + " cameras · changes appear on the TV straight away";
+  const editable = state.editable !== false;
+  $("add-btn").disabled = full || !editable;
+  $("nvr-btn").disabled = full || !editable;
+  $("count").textContent = editable
+    ? state.cameras.length + " of " + state.max + " cameras · changes appear on the TV straight away"
+    : state.cameras.length + " of " + state.max + " cameras · open Settings on the TV to change them (the TV section still works)";
   if (state.cameras.length === 0) {
     const p = document.createElement("p");
     p.className = "sub";
@@ -207,13 +262,87 @@ function render() {
     meta.textContent = host(c.mainUrl) + " · " + (c.subUrl ? "main + grid stream" : "main only") + " · " + (c.useTcp ? "TCP" : "UDP") + (c.hasPassword ? "" : " · no password");
     info.append(name, meta);
     card.append(info,
+      button("📺", "icon", () => tv("camera", c.id), "Show " + c.name + " on the TV", !c.enabled),
       button("↑", "icon", () => move(i, -1), "Move " + c.name + " up", i === 0),
       button("↓", "icon", () => move(i, 1), "Move " + c.name + " down", i === state.cameras.length - 1),
-      button(c.enabled ? "Hide" : "Show", "", () => save(Object.assign({}, c, { enabled: !c.enabled }))),
-      button("Edit", "", () => openForm(c)));
+      button(c.enabled ? "Hide" : "Show", "", () => save(Object.assign({}, c, { enabled: !c.enabled })), "", !editable),
+      button("Edit", "", () => openForm(c), "", !editable));
     list.append(card);
   });
   $("layout").value = state.layout;
+  renderGroups();
+}
+
+function renderGroups() {
+  const groups = state.groups || [];
+  const list = $("groups");
+  list.replaceChildren();
+  const editable = state.editable !== false;
+  $("group-add").disabled = groups.length >= (state.maxGroups || 8) || !editable;
+  if (groups.length === 0) {
+    const p = document.createElement("p");
+    p.className = "sub"; p.style.marginTop = "12px";
+    p.textContent = "No groups yet. The grid shows all cameras.";
+    list.append(p);
+  }
+  groups.forEach(g => {
+    const card = document.createElement("div");
+    card.className = "cam";
+    const info = document.createElement("div");
+    info.className = "info";
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = g.name + (g.id === state.currentGroupId ? " (showing)" : "");
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const names = g.cameraIds.map(id => (state.cameras.find(c => c.id === id) || {}).name).filter(Boolean);
+    meta.textContent = names.length ? names.join(", ") : "No cameras";
+    info.append(name, meta);
+    card.append(info,
+      button("📺", "icon", () => tv("group", g.id), "Show " + g.name + " on the TV"),
+      button("Edit", "", () => openGroupForm(g), "", !editable));
+    list.append(card);
+  });
+  // The TV section's group picker.
+  const pick = $("tv-group");
+  const current = state.currentGroupId || "";
+  pick.replaceChildren(new Option("All cameras", ""));
+  groups.forEach(g => pick.append(new Option(g.name, g.id)));
+  pick.value = current;
+}
+
+async function tv(action, id) {
+  try {
+    state = await api("/view", { action, id: id || "" });
+    render();
+    msg($("tv-msg"), "");
+  } catch (e) {
+    msg($("tv-msg"), e.message, "err");
+    refresh(); // the picker must show what the TV actually shows
+  }
+}
+
+function openGroupForm(g) {
+  editing = g || {};
+  const isNew = !g;
+  $("group-title").textContent = isNew ? "Add group" : "Edit " + g.name;
+  $("g-name").value = g ? g.name : "";
+  const box = $("g-cameras");
+  box.replaceChildren();
+  state.cameras.forEach(c => {
+    const label = document.createElement("label");
+    label.className = "check";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = c.id;
+    input.checked = !!(g && g.cameraIds.includes(c.id));
+    label.append(input, document.createTextNode(" " + c.name + (c.enabled ? "" : " (hidden)")));
+    box.append(label);
+  });
+  $("group-delete").classList.toggle("hidden-el", isNew);
+  msg($("group-msg"), "");
+  show("group-form");
+  $("g-name").focus();
 }
 
 function button(text, cls, onClick, label, disabled) {
@@ -259,8 +388,8 @@ async function move(i, delta) {
 }
 
 function show(section) {
-  if (section !== "form-section") editing = null; // closing the form resumes live refresh
-  ["form-section", "nvr-section"].forEach(id => $(id).classList.toggle("hidden-el", id !== section));
+  if (section !== "form-section" && section !== "group-form") editing = null; // closing a form resumes live refresh
+  ["form-section", "nvr-section", "group-form"].forEach(id => $(id).classList.toggle("hidden-el", id !== section));
   if (section) $(section).scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -276,6 +405,9 @@ function openForm(c) {
   $("f-pass").placeholder = c && c.hasPassword ? "Saved — leave empty to keep it" : "";
   $("f-tcp").value = !c || c.useTcp ? "1" : "0";
   $("f-enabled").checked = !c || c.enabled;
+  $("f-full").checked = !!(c && c.fullQuality);
+  $("f-motion").value = c && c.motion ? c.motion : "DEFAULT";
+  $("f-beep").checked = !!(c && c.motionBeep);
   $("delete-btn").classList.toggle("hidden-el", isNew);
   msg($("form-msg"), "");
   show("form-section");
@@ -291,6 +423,9 @@ function formCamera() {
     username: $("f-user").value.trim(),
     useTcp: $("f-tcp").value === "1",
     enabled: $("f-enabled").checked,
+    fullQuality: $("f-full").checked,
+    motion: $("f-motion").value,
+    motionBeep: $("f-beep").checked,
   };
   if ($("f-pass").value !== "") camera.password = $("f-pass").value; // empty = keep the saved one
   return camera;
@@ -352,6 +487,55 @@ $("nvr-create").addEventListener("click", async () => {
   if (b.replace && state.cameras.length > 0 && !confirm("Replace your " + state.cameras.length + " existing camera(s)?")) return;
   try { state = await api("/nvr", b); render(); show(null); setStatus("Cameras created"); }
   catch (e) { msg($("nvr-msg"), e.message, "err"); }
+});
+
+$("tv-grid").addEventListener("click", () => tv("grid"));
+$("tv-prev").addEventListener("click", () => tv("prev"));
+$("tv-next").addEventListener("click", () => tv("next"));
+$("tv-tour").addEventListener("click", () => tv("tour"));
+$("tv-group").addEventListener("change", e => tv("group", e.target.value));
+
+$("group-add").addEventListener("click", () => openGroupForm(null));
+$("group-cancel").addEventListener("click", () => show(null));
+$("group-save").addEventListener("click", async () => {
+  const cameraIds = [...$("g-cameras").querySelectorAll("input:checked")].map(i => i.value);
+  const body = { id: editing && editing.id ? editing.id : "", name: $("g-name").value.trim(), cameraIds };
+  try { state = await api("/group", body); render(); show(null); }
+  catch (e) { msg($("group-msg"), e.message, "err"); }
+});
+$("group-delete").addEventListener("click", async () => {
+  if (!editing || !editing.id) return;
+  if (!confirm("Delete the group " + editing.name + "?")) return;
+  try { state = await api("/group/delete", { id: editing.id }); render(); show(null); }
+  catch (e) { msg($("group-msg"), e.message, "err"); }
+});
+
+async function fetchLog() {
+  const res = await fetch("/api/log?lines=400", { headers: { "X-Token": token } });
+  if (res.status === 403) { showPair("Settings was closed on the TV. Connect again."); throw new Error("Not connected to the TV."); }
+  if (!res.ok) throw new Error("The TV refused (" + res.status + ")");
+  return await res.text();
+}
+$("log-show").addEventListener("click", async () => {
+  try {
+    const text = await fetchLog();
+    const pre = $("log");
+    pre.textContent = text || "(empty)";
+    pre.classList.remove("hidden-el");
+    pre.scrollTop = pre.scrollHeight;
+    msg($("log-msg"), "");
+  } catch (e) { msg($("log-msg"), e.message, "err"); }
+});
+$("log-download").addEventListener("click", async () => {
+  try {
+    const blob = new Blob([await fetchLog()], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "swanntv-log-" + new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-") + ".txt";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    msg($("log-msg"), "Log saved to this phone.", "ok");
+  } catch (e) { msg($("log-msg"), e.message, "err"); }
 });
 
 $("layout").addEventListener("change", async e => {

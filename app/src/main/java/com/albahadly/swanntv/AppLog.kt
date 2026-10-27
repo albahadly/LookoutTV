@@ -32,6 +32,18 @@ object AppLog {
     /** Replaces the user:password part of a stream URL with asterisks. */
     fun redact(url: String): String = url.replace(Regex("//[^/@]*@"), "//***@")
 
+    /** The last [lines] lines of the log file (for the phone page), or a note when there is none. */
+    @Synchronized
+    fun tail(lines: Int): String {
+        val f = file ?: return "No log file on this TV."
+        return try {
+            val all = f.readLines()
+            all.takeLast(lines).joinToString("\n")
+        } catch (e: Exception) {
+            "Couldn't read the log: ${e.message}"
+        }
+    }
+
     /** Synchronized: the phone-setup server logs from its own threads (SimpleDateFormat isn't thread-safe). */
     @Synchronized
     private fun write(priority: Int, message: String, error: Throwable?) {

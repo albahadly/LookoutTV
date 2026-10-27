@@ -2,12 +2,13 @@
 
 An Android TV app for watching RTSP security cameras — built for a Swann NVR on a TCL Google TV, but it works with any camera that has an RTSP stream.
 
-- **Live grid** of up to 9 cameras (1, 2×2 or 3×3), with a second page for cameras 10–16.
+- **Live grid** of up to 9 cameras (1, 2×2, 1+5 or 3×3), with more pages for up to 16 cameras, and named **groups** (a "Front" group with just the front door and driveway, say) switched from the grid's header.
+- **Sound in the grid**: press 0 (or hold OK) on a camera to hear it. A camera can be set to **always full quality** in the 2×2 and 1+5 grids (one per page; it starts first so the TV's 4K decoder is never opened next to another).
 - **1-camera view in full quality**: with one camera on screen it plays the main (4K) stream with sound; flipping cameras stops the old stream first, so the TV's 4K decoder never runs twice.
 - **Settings on the TV**: add a whole NVR in one step or single cameras, test them, reorder, hide, rename; optional PIN lock.
-- **Phone setup**: scan a QR code in Settings and do the same from your phone's browser, plus backup and restore.
+- **Phone setup**: scan a QR code in Settings and do the same from your phone's browser, plus backup and restore. The page is also a **remote** (open a camera on the TV, tour, groups) and shows the TV's **log**.
 - **Instant full screen**: the tile fills the screen in under 0.2 s, then the full-quality (4K) stream takes over within a second, with the camera's sound (the grid stays silent).
-- **Motion highlight**: grid cameras with movement get an orange border and a MOTION label; optionally the camera opens full screen and returns to the grid after 30 s.
+- **Motion highlight**: grid cameras with movement get an orange border and a MOTION label; optionally the camera opens full screen and returns to the grid after 30 s. Sensitivity can be set per camera, with an optional beep.
 - **Zoom**: ▲ in full screen zooms 2×, 3×, 4× into the 4K picture; the D-pad moves around, Back zooms out.
 - **Camera tour**: ▶ Tour (or the Play button) shows each camera full screen in turn, 5 s to 1 min each.
 - **Floating camera window** (off by default, Settings → Viewing): press Home while a camera is full screen and it keeps playing in a corner over other apps; pick its size and corner in Settings. Needs a one-time `adb shell appops set com.albahadly.swanntv SYSTEM_ALERT_WINDOW allow` (the TCL refuses Android picture-in-picture).
@@ -56,7 +57,7 @@ Release builds are signed with the debug key, so installing a build from another
 
 The phone page is served by the TV itself, only while Settings is open on screen:
 
-- It listens on port 8765 (or the next free one up to 8775). A new one-time key is made each time Settings opens, carried in the QR code; leaving Settings (or 15 minutes without use) stops the server and the key stops working.
+- It listens on port 8765 (or the next free one up to 8775). A one-time key is made when Settings opens, carried in the QR code. With **Keep the phone connected** on (the default), leaving Settings keeps the phone connected as a remote (open cameras, tour, groups, log) for 15 minutes of use; changing cameras always needs Settings open on the TV. Leaving the app ends the connection.
 - No QR scanner? Type the address shown on the TV and enter the 6-digit code next to it. Five wrong codes switch the code off until Settings is reopened.
 - Only devices with home-network (private) addresses are answered, and the page must be opened by the TV's own address.
 - Saved passwords are never shown on the phone; a saved password is only reused for the address it was saved with. Only a backup you tick **Include passwords** for contains them, as plain text.
@@ -69,8 +70,9 @@ The phone page is served by the TV itself, only while Settings is open on screen
 | Grid | ◀ ▲ ▼ ▶ | Move between tiles; ◀ ▶ past the left or right edge changes page |
 | Grid | OK | Open camera full screen |
 | Grid | 1–9 | Open that tile directly |
+| Grid | 0, or hold OK | Sound on / off for the selected camera |
 | Grid | CH + / CH − (also Page Up/Down, Next/Previous) | Next / previous page |
-| Grid | ▲ to the header | Layout, Tour and Settings |
+| Grid | ▲ to the header | Layout, group, Tour and Settings |
 | Anywhere | ▶ (Play) | Start / stop the camera tour |
 | Full screen | ◀ ▶ | Previous / next camera (all cameras, across pages) |
 | Full screen | ▲ | Zoom 2×; then OK zooms to 3×, 4× and back |

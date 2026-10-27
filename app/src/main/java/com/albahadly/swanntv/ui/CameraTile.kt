@@ -55,21 +55,22 @@ fun CameraTile(
 ) {
     val fullscreen = state.isFullscreen
     val active = state.isTileActive(camera.index)
-    // The 1-camera layout plays the full-quality stream: it fills the screen anyway.
-    val fullQuality = state.layout == GridLayout.ONE
+    // The 1-camera layout plays the full-quality stream (it fills the screen anyway); so does a
+    // camera set to "always full quality" in the 2×2 and 1+5 layouts (3×3 is too much for the TV).
+    val fullQuality = state.layout == GridLayout.ONE ||
+        (camera.preferMain && state.layout != GridLayout.NINE)
     var surfaceView by remember { mutableStateOf<SurfaceView?>(null) }
-    var player by remember { mutableStateOf<StreamPlayer?>(null) }
     var focused by remember { mutableStateOf(false) }
+    var okHeld by remember { mutableStateOf(false) }
+    val player = state.manager.tiles[camera.index]
 
-    // The stream runs exactly while the tile is active and its surface exists.
-    DisposableEffect(surfaceView, active, state.session, fullQuality) {
+    // The stream runs exactly while the tile is active and its surface exists. The camera is a
+    // key too: after a group change the same slot may show another camera.
+    DisposableEffect(surfaceView, active, state.session, fullQuality, camera) {
         val view = surfaceView
-        if (view != null && active) player = state.manager.attachTile(camera, view, fullQuality)
+        if (view != null && active) state.manager.attachTile(camera, view, fullQuality)
         onDispose {
-            if (view != null && active) {
-                state.manager.detachTile(camera.index)
-                player = null
-            }
+            if (view != null && active) state.manager.detachTile(camera.index)
         }
     }
 
@@ -80,7 +81,26 @@ fun CameraTile(
                 focused = it.isFocused
                 if (it.isFocused) state.focusedIndex = camera.index
             }
-            .onPreviewKeyEvent { event -> !fullscreen && onTileKey(event, camera, slot, state) }
+            .onPreviewKeyEvent { event ->
+                if (fullscreen) return@onPreviewKeyEvent false
+                // Holding OK toggles the tile's sound; a short press opens the camera.
+                if (event.key.isSelect()) {
+                    when {
+                        event.type == KeyEventType.KeyDown && event.nativeKeyEvent.repeatCount == 0 -> okHeld = false
+                        event.type == KeyEventType.KeyDown && event.nativeKeyEvent.repeatCount == 1 -> {
+                            okHeld = true
+                            state.toggleSound()
+                        }
+                        event.type == KeyEventType.KeyUp -> {
+                            val held = okHeld
+                            okHeld = false
+                            if (!held) state.open(camera)
+                        }
+                    }
+                    return@onPreviewKeyEvent true
+                }
+                onTileKey(event, slot, state)
+            }
             .focusable()
             .background(Palette.Tile)
     ) {
@@ -101,7 +121,10 @@ fun CameraTile(
         }
 
         if (!fullscreen) {
-            if (status == StreamPlayer.Status.LIVE) LiveBadge(Modifier.align(Alignment.TopStart).padding(8.dp))
+            Row(Modifier.align(Alignment.TopStart).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (status == StreamPlayer.Status.LIVE) LiveBadge()
+                if (state.manager.listening == camera.index) SoundBadge()
+            }
             NameChip(camera, focused, Modifier.align(Alignment.BottomStart).padding(8.dp))
             if (state.manager.motion.containsKey(camera.index)) {
                 Box(Modifier.fillMaxSize().border(4.dp, Palette.Motion))
@@ -112,28 +135,35 @@ fun CameraTile(
     }
 }
 
-/** OK opens the camera; left/right past the grid's edge changes page. */
-private fun onTileKey(event: KeyEvent, camera: Camera, slot: Int, state: ViewerState): Boolean {
-    val columns = state.layout.columns
-    val column = slot % columns
-    val rowStart = slot - column
+/** Left/right past the grid's edge changes page. */
+private fun onTileKey(event: KeyEvent, slot: Int, state: ViewerState): Boolean {
+    val layout = state.layout
     val lastSlot = state.visibleCameras.lastIndex
     return when {
-        event.key.isSelect() -> {
-            if (event.type == KeyEventType.KeyUp) state.open(camera)
+        event.key == Key.DirectionRight && layout.isRightEdge(slot, lastSlot) && state.page < state.pageCount - 1 -> {
+            if (event.type == KeyEventType.KeyDown) state.nextPage(focusSlot = layout.nextPageSlot(slot))
             true
         }
-        event.key == Key.DirectionRight && (column == columns - 1 || slot == lastSlot) &&
-            state.page < state.pageCount - 1 -> {
-            if (event.type == KeyEventType.KeyDown) state.nextPage(focusSlot = rowStart)
-            true
-        }
-        event.key == Key.DirectionLeft && column == 0 && state.page > 0 -> {
-            if (event.type == KeyEventType.KeyDown) state.previousPage(focusSlot = rowStart + columns - 1)
+        event.key == Key.DirectionLeft && layout.isLeftEdge(slot) && state.page > 0 -> {
+            if (event.type == KeyEventType.KeyDown) state.previousPage(focusSlot = layout.previousPageSlot(slot))
             true
         }
         else -> false
     }
+}
+
+@Composable
+private fun SoundBadge() {
+    Text(
+        "♪ SOUND",
+        fontSize = 8.sp,
+        fontWeight = FontWeight.Bold,
+        color = Palette.OnAccent,
+        letterSpacing = 0.6.sp,
+        modifier = Modifier
+            .background(Palette.Accent, RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 3.dp),
+    )
 }
 
 @Composable

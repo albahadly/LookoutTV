@@ -4,6 +4,8 @@ import android.os.Handler
 import android.os.Looper
 import com.albahadly.swanntv.data.AppSettings
 import com.albahadly.swanntv.data.CameraConfig
+import com.albahadly.swanntv.data.CameraGroup
+import com.albahadly.swanntv.data.CameraMotion
 import com.albahadly.swanntv.data.LayoutPreference
 import com.albahadly.swanntv.data.SettingsStore
 import com.albahadly.swanntv.playback.CameraTester
@@ -31,13 +33,28 @@ class PhoneSetupApi(
     private val tester: CameraTester,
     /** True while [token] is the running session's key (false once Settings has closed). */
     private val isCurrentSession: (token: String) -> Boolean,
+    /** The TV remote: runs on the main thread; returns an error message, or null when done. */
+    private val control: (action: String, id: String) -> String?,
+    /** The last lines of the TV's log, newest last. */
+    private val logTail: (lines: Int) -> String,
 ) {
     private class Rejected(val status: Int, message: String) : Exception(message)
 
     private val main = Handler(Looper.getMainLooper())
     private val testRunning = AtomicBoolean(false)
 
+    /**
+     * True while Settings is open on the TV. Afterwards the phone keeps only the remote, the
+     * state and the log: changing cameras needs Settings open (and its PIN) on the TV.
+     */
+    @Volatile var settingsOpen: Boolean = false
+
+    private val alwaysAllowed = setOf("GET /state", "POST /view", "GET /log")
+
     fun handle(token: String, method: String, path: String, query: Map<String, String>, body: String): PhoneSetupServer.Response = try {
+        if (!settingsOpen && "$method $path" !in alwaysAllowed) {
+            throw Rejected(409, "Open Settings on the TV to change cameras. The phone stays connected as a remote.")
+        }
         when ("$method $path") {
             "GET /state" -> ok(onMain(token) { stateJson(settings()) })
             "POST /camera" -> saveCamera(token, JSONObject(body))
@@ -48,6 +65,10 @@ class PhoneSetupApi(
             "POST /layout" -> setLayout(token, JSONObject(body).str("layout"))
             "GET /export" -> ok(onMain(token) { exportJson(settings(), query["passwords"] == "1") })
             "POST /import" -> import(token, JSONObject(body))
+            "POST /view" -> view(token, JSONObject(body))
+            "POST /group" -> saveGroup(token, JSONObject(body))
+            "POST /group/delete" -> deleteGroup(token, JSONObject(body).str("id"))
+            "GET /log" -> PhoneSetupServer.Response.text(logTail((query["lines"]?.toIntOrNull() ?: 300).coerceIn(10, 2000)), 200)
             else -> error("Unknown request", 404)
         }
     } catch (e: Rejected) {
@@ -96,6 +117,9 @@ class PhoneSetupApi(
                 password = password,
                 useTcp = json.optBoolean("useTcp", true),
                 enabled = json.optBoolean("enabled", true),
+                motion = runCatching { CameraMotion.valueOf(json.str("motion")) }.getOrDefault(existing?.motion ?: CameraMotion.DEFAULT),
+                motionBeep = json.optBoolean("motionBeep", existing?.motionBeep ?: false),
+                fullQuality = json.optBoolean("fullQuality", existing?.fullQuality ?: false),
             )
             val list = if (existing == null) current.cameras + camera
             else current.cameras.map { if (it.id == camera.id) camera else it }
@@ -209,6 +233,9 @@ class PhoneSetupApi(
                 password = c.str("password").ifEmpty { urlPass.orEmpty() },
                 useTcp = c.optBoolean("useTcp", true),
                 enabled = c.optBoolean("enabled", true),
+                motion = runCatching { CameraMotion.valueOf(c.str("motion")) }.getOrDefault(CameraMotion.DEFAULT),
+                motionBeep = c.optBoolean("motionBeep", false),
+                fullQuality = c.optBoolean("fullQuality", false),
             )
         }
         return mutate(token) {
@@ -219,6 +246,47 @@ class PhoneSetupApi(
             }
             commit(current.copy(cameras = list, layout = layout ?: current.layout))
         }
+    }
+
+    /** The TV remote: open a camera, back to the grid, tour, previous/next, choose a group. */
+    private fun view(token: String, json: JSONObject): PhoneSetupServer.Response {
+        val action = json.str("action")
+        if (action !in setOf("camera", "grid", "tour", "next", "prev", "group")) return error("Unknown action.")
+        return mutate(token) {
+            control(action, json.str("id"))?.let { throw Rejected(409, it) }
+            stateJson(settings())
+        }
+    }
+
+    private fun saveGroup(token: String, json: JSONObject): PhoneSetupServer.Response {
+        val name = json.str("name").trim()
+        if (name.isEmpty()) return error("Give the group a name.")
+        if (name.length > 40) return error("Keep the group name under 40 characters.")
+        val idsArray = json.optJSONArray("cameraIds") ?: JSONArray()
+        val wanted = (0 until idsArray.length()).map { idsArray.optString(it) }.distinct()
+        return mutate(token) {
+            val current = settings()
+            val known = current.cameras.map { it.id }
+            val ids = known.filter { it in wanted } // in camera-list order
+            if (ids.isEmpty()) throw Rejected(400, "Choose at least one camera.")
+            val id = json.str("id")
+            val existing = if (id.isEmpty()) null else current.groups.firstOrNull { it.id == id }
+                ?: throw Rejected(409, "That group was deleted on the TV meanwhile.")
+            if (existing == null && current.groups.size >= AppSettings.MAX_GROUPS) {
+                throw Rejected(400, "${AppSettings.MAX_GROUPS} groups is the maximum.")
+            }
+            val group = (existing ?: CameraGroup(name = name, cameraIds = ids)).copy(name = name, cameraIds = ids)
+            val list = if (existing == null) current.groups + group else current.groups.map { if (it.id == group.id) group else it }
+            commit(current.copy(groups = list))
+        }
+    }
+
+    private fun deleteGroup(token: String, id: String) = mutate(token) {
+        val current = settings()
+        commit(current.copy(
+            groups = current.groups.filter { it.id != id },
+            currentGroupId = if (current.currentGroupId == id) "" else current.currentGroupId,
+        ))
     }
 
     // ------------------------------------------------------------------ checks and JSON
@@ -257,9 +325,18 @@ class PhoneSetupApi(
                     .put("username", c.username)
                     .put("hasPassword", c.password.isNotEmpty()) // never the password itself
                     .put("useTcp", c.useTcp)
-                    .put("enabled", c.enabled))
+                    .put("enabled", c.enabled)
+                    .put("motion", c.motion.name)
+                    .put("motionBeep", c.motionBeep)
+                    .put("fullQuality", c.fullQuality))
             }
         })
+        .put("groups", JSONArray().apply {
+            s.groups.forEach { g -> put(JSONObject().put("id", g.id).put("name", g.name).put("cameraIds", JSONArray(g.cameraIds))) }
+        })
+        .put("currentGroupId", s.currentGroupId)
+        .put("maxGroups", AppSettings.MAX_GROUPS)
+        .put("editable", settingsOpen)
         .toString()
 
     private fun exportJson(s: AppSettings, withPasswords: Boolean): String = JSONObject()
@@ -275,7 +352,10 @@ class PhoneSetupApi(
                     .put("username", c.username)
                     .apply { if (withPasswords) put("password", c.password) }
                     .put("useTcp", c.useTcp)
-                    .put("enabled", c.enabled))
+                    .put("enabled", c.enabled)
+                    .put("motion", c.motion.name)
+                    .put("motionBeep", c.motionBeep)
+                    .put("fullQuality", c.fullQuality))
             }
         })
         .toString(2)

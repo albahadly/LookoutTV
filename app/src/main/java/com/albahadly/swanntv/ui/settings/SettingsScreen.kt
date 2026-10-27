@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,6 +41,7 @@ import androidx.tv.material3.Text
 import com.albahadly.swanntv.BuildConfig
 import com.albahadly.swanntv.data.AppSettings
 import com.albahadly.swanntv.data.CameraConfig
+import com.albahadly.swanntv.data.CameraGroup
 import com.albahadly.swanntv.data.LayoutPreference
 import com.albahadly.swanntv.data.FloatingSize
 import com.albahadly.swanntv.data.FloatingCorner
@@ -64,6 +66,7 @@ fun SettingsScreen(app: AppController) {
     val settings = app.settings
     var pane by remember { mutableStateOf(Pane.CAMERAS) }
     var editing by remember { mutableStateOf<Pair<CameraConfig, Boolean>?>(null) } // camera, isNew
+    var editingGroup by remember { mutableStateOf<Pair<CameraGroup, Boolean>?>(null) } // group, isNew
     var nvrOpen by remember { mutableStateOf(false) }
     var pinFlow by remember { mutableStateOf<PinFlow?>(null) }
     val paneFocus = remember { Pane.entries.associateWith { FocusRequester() } }
@@ -75,6 +78,7 @@ fun SettingsScreen(app: AppController) {
         when {
             pinFlow != null -> pinFlow = null
             editing != null -> editing = null
+            editingGroup != null -> editingGroup = null
             nvrOpen -> nvrOpen = false
             else -> app.closeSettings()
         }
@@ -82,8 +86,8 @@ fun SettingsScreen(app: AppController) {
 
     // One place decides focus: on opening Settings and after a PIN screen, the current menu
     // item; after closing a camera form, back on the camera list.
-    LaunchedEffect(pinFlow, editing == null && !nvrOpen) {
-        if (pinFlow != null || editing != null || nvrOpen) return@LaunchedEffect
+    LaunchedEffect(pinFlow, editing == null && editingGroup == null && !nvrOpen) {
+        if (pinFlow != null || editing != null || editingGroup != null || nvrOpen) return@LaunchedEffect
         withFrameNanos { }
         runCatching {
             if (returnToList && pane == Pane.CAMERAS) addFocus.requestFocus()
@@ -142,11 +146,11 @@ fun SettingsScreen(app: AppController) {
             Pane.entries.forEach { p ->
                 NavItem(
                     p.label,
-                    selected = p == pane && editing == null && !nvrOpen,
+                    selected = p == pane && editing == null && editingGroup == null && !nvrOpen,
                     modifier = Modifier.focusRequester(paneFocus.getValue(p)),
                 ) {
                     // Moving onto the menu while a form is open must not throw away what was typed.
-                    if (editing == null && !nvrOpen) pane = p
+                    if (editing == null && editingGroup == null && !nvrOpen) pane = p
                 }
             }
         }
@@ -183,6 +187,37 @@ fun SettingsScreen(app: AppController) {
                         onCancel = { editing = null },
                     )
                 }
+                editingGroup != null -> {
+                    val (group, isNew) = editingGroup!!
+                    GroupForm(
+                        initial = group,
+                        isNew = isNew,
+                        cameras = app.settings.cameras,
+                        onSave = { saved ->
+                            val current = app.settings
+                            val exists = current.groups.any { it.id == saved.id }
+                            when {
+                                !exists && current.groups.size >= AppSettings.MAX_GROUPS -> "${AppSettings.MAX_GROUPS} groups is the maximum."
+                                else -> {
+                                    val updated = if (exists) current.groups.map { if (it.id == saved.id) saved else it }
+                                    else current.groups + saved
+                                    app.update(current.copy(groups = updated))
+                                    editingGroup = null
+                                    null
+                                }
+                            }
+                        },
+                        onDelete = {
+                            val current = app.settings
+                            app.update(current.copy(
+                                groups = current.groups.filter { it.id != group.id },
+                                currentGroupId = if (current.currentGroupId == group.id) "" else current.currentGroupId,
+                            ))
+                            editingGroup = null
+                        },
+                        onCancel = { editingGroup = null },
+                    )
+                }
                 nvrOpen -> NvrForm(
                     existingCount = settings.cameras.size,
                     tester = app.tester,
@@ -212,8 +247,21 @@ fun SettingsScreen(app: AppController) {
                         editing = it to false
                     },
                     onChange = { app.update(settings.copy(cameras = it)) },
+                    onAddGroup = {
+                        returnToList = true
+                        editingGroup = CameraGroup(name = "", cameraIds = emptyList()) to true
+                    },
+                    onEditGroup = {
+                        returnToList = true
+                        editingGroup = it to false
+                    },
                 )
-                pane == Pane.PHONE -> PhoneSetupPane(app.phoneSetupUrl, app.phoneSetupAddress, app.phoneSetupCode, app.phoneSetupIdle, onRetry = app::startPhoneSetup)
+                pane == Pane.PHONE -> PhoneSetupPane(
+                    app.phoneSetupUrl, app.phoneSetupAddress, app.phoneSetupCode, app.phoneSetupIdle,
+                    keepConnected = settings.phoneControl,
+                    onKeepConnected = { app.update(settings.copy(phoneControl = it)) },
+                    onRetry = app::startPhoneSetup,
+                )
                 pane == Pane.LAYOUT -> ViewingPane(settings) { app.update(it) }
                 pane == Pane.SECURITY -> SecurityPane(
                     hasPin = settings.hasPin,
@@ -268,6 +316,8 @@ private fun CamerasPane(
     onAddFromNvr: () -> Unit,
     onEdit: (CameraConfig) -> Unit,
     onChange: (List<CameraConfig>) -> Unit,
+    onAddGroup: () -> Unit,
+    onEditGroup: (CameraGroup) -> Unit,
 ) {
     val cameras = settings.cameras
     val full = cameras.size >= AppSettings.MAX_CAMERAS
@@ -315,6 +365,34 @@ private fun CamerasPane(
                     },
                     onEdit = { onEdit(camera) },
                 )
+            }
+            item(key = "groups-title") {
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) {
+                        SectionTitle("Groups", "A group shows only some cameras · switch with the group chip in the grid's header")
+                    }
+                    TvButton("Add group", enabled = settings.groups.size < AppSettings.MAX_GROUPS, onClick = onAddGroup)
+                }
+            }
+            items(settings.groups, key = { "group-" + it.id }) { group ->
+                val names = group.cameraIds.mapNotNull { id -> cameras.firstOrNull { it.id == id }?.name }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Palette.Surface, RoundedCornerShape(10.dp))
+                        .border(1.dp, Palette.Border, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(group.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Palette.TextBright)
+                        Text(names.joinToString(", ").ifEmpty { "No cameras" }, fontSize = 9.sp, color = Palette.Quiet, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (group.id == settings.currentGroupId) Text("Showing", fontSize = 9.sp, color = Palette.Accent)
+                    TvButton("Edit") { onEditGroup(group) }
+                }
             }
         }
     }
@@ -375,11 +453,13 @@ private fun ViewingPane(settings: AppSettings, onChange: (AppSettings) -> Unit) 
                 LayoutPreference.AUTO to "Automatic",
                 LayoutPreference.ONE to "1",
                 LayoutPreference.FOUR to "2×2",
+                LayoutPreference.SIX to "1+5",
                 LayoutPreference.NINE to "3×3",
             ),
             settings.layout,
         ) { onChange(settings.copy(layout = it)) }
-        Hint("Automatic picks 1, 2×2 or 3×3 from the number of cameras. With 1 camera on screen it plays in full quality, with sound.")
+        Hint("Automatic picks 1, 2×2, 1+5 or 3×3 from the number of cameras. With 1 camera on screen it plays in full quality, with sound. In 1+5 the first camera of each page gets the big tile: reorder the list to choose it.")
+        Hint("Sound in the grid: press 0 (or hold OK) on a camera to hear it; press again to mute.")
         Hint("The grid never shows more than 9 at once: this TV can't play more live streams smoothly. More cameras go on a second page.")
 
         Spacer(Modifier.height(8.dp))

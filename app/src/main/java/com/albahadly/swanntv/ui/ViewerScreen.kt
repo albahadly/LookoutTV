@@ -87,7 +87,7 @@ fun ViewerScreen(state: ViewerState, onOpenSettings: () -> Unit) {
         }
 
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val grid = GridGeometry(maxWidth, maxHeight, state.layout.columns)
+            val grid = GridGeometry(maxWidth, maxHeight, state.layout)
 
             // Tiles. key() keeps each tile's SurfaceView alive when it grows to full screen.
             state.visibleCameras.forEachIndexed { slot, camera ->
@@ -96,9 +96,10 @@ fun ViewerScreen(state: ViewerState, onOpenSettings: () -> Unit) {
                         val tileModifier = if (state.isFullscreen) {
                             Modifier.fillMaxSize()
                         } else {
+                            val cell = grid.cell(slot)
                             Modifier
-                                .offset(grid.x(slot), grid.y(slot))
-                                .size(grid.tileWidth, grid.tileHeight)
+                                .offset(cell.x, cell.y)
+                                .size(cell.width, cell.height)
                         }
                         CameraTile(camera, slot, state, requester(camera.index), tileModifier)
                     }
@@ -137,6 +138,7 @@ private fun onScreenKey(event: KeyEvent, state: ViewerState): Boolean {
     }
     val digit = digitOf(event.key)
     return when {
+        event.key in SOUND_KEYS -> { if (down) state.toggleSound(); true }
         digit != null -> { if (down) state.openSlot(digit - 1); true }
         event.key in NEXT_PAGE_KEYS -> { if (down) state.nextPage(); true }
         event.key in PREVIOUS_PAGE_KEYS -> { if (down) state.previousPage(); true }
@@ -145,6 +147,8 @@ private fun onScreenKey(event: KeyEvent, state: ViewerState): Boolean {
 }
 
 private val PLAY_KEYS = setOf(Key.MediaPlay, Key.MediaPlayPause)
+/** Sound for the selected tile: 0, or the remote's mute / audio-track key where the TV passes it on. */
+private val SOUND_KEYS = setOf(Key.Zero, Key.NumPad0, Key.VolumeMute, Key.MediaAudioTrack)
 private val NEXT_PAGE_KEYS = setOf(Key.ChannelUp, Key.PageDown, Key.MediaNext)
 private val PREVIOUS_PAGE_KEYS = setOf(Key.ChannelDown, Key.PageUp, Key.MediaPrevious)
 
@@ -161,16 +165,23 @@ private fun digitOf(key: Key): Int? = when (key) {
     else -> null
 }
 
-/** Tile positions: 16:9 tiles, centred in the space between header and footer. */
-private class GridGeometry(width: Dp, height: Dp, private val columns: Int) {
+/** One tile's place on screen. */
+private class Cell(val x: Dp, val y: Dp, val width: Dp, val height: Dp)
+
+/**
+ * Tile positions: 16:9 tiles, centred in the space between header and footer. The 1+5 layout
+ * is a 3×3 grid of small tiles where slot 0 covers the top-left 2×2.
+ */
+private class GridGeometry(width: Dp, height: Dp, private val layout: GridLayout) {
+    private val columns = layout.columns
     private val gap = 8.dp
     private val areaTop = 76.dp
     private val areaBottom = height - 44.dp
     private val areaWidth = width - 64.dp
     private val areaHeight = areaBottom - areaTop
 
-    val tileHeight: Dp
-    val tileWidth: Dp
+    private val tileHeight: Dp
+    private val tileWidth: Dp
     private val left: Dp
     private val top: Dp
 
@@ -185,8 +196,27 @@ private class GridGeometry(width: Dp, height: Dp, private val columns: Int) {
         top = areaTop + (areaHeight - gridHeight) / 2
     }
 
-    fun x(slot: Int): Dp = left + (tileWidth + gap) * (slot % columns)
-    fun y(slot: Int): Dp = top + (tileHeight + gap) * (slot / columns)
+    fun cell(slot: Int): Cell {
+        if (layout == GridLayout.SIX) {
+            // Small-tile grid positions (column, row) of the five small slots; slot 0 is the big one.
+            val (col, row) = when (slot) {
+                0 -> 0 to 0
+                1 -> 2 to 0
+                2 -> 2 to 1
+                3 -> 0 to 2
+                4 -> 1 to 2
+                else -> 2 to 2
+            }
+            val span = if (slot == 0) 2 else 1
+            return Cell(
+                x = left + (tileWidth + gap) * col,
+                y = top + (tileHeight + gap) * row,
+                width = tileWidth * span + gap * (span - 1),
+                height = tileHeight * span + gap * (span - 1),
+            )
+        }
+        return Cell(left + (tileWidth + gap) * (slot % columns), top + (tileHeight + gap) * (slot / columns), tileWidth, tileHeight)
+    }
 }
 
 @Composable
@@ -218,6 +248,10 @@ private fun Header(state: ViewerState, onOpenSettings: () -> Unit, modifier: Mod
                 FocusChip(layout.label, selected = layout == state.layout) { state.changeLayout(layout) }
             }
         }
+        if (state.groupCount > 0) {
+            HSpace(12)
+            FocusChip("▣  ${state.groupName ?: "All cameras"}", selected = state.groupName != null) { state.nextGroup() }
+        }
         if (state.cameras.size > 1) {
             HSpace(12)
             FocusChip("▶  Tour", selected = false) { state.toggleTour() }
@@ -242,6 +276,7 @@ private fun Footer(state: ViewerState, modifier: Modifier) {
         KeyHint("OK", "Full screen")
         KeyHint("◀ ▲ ▼ ▶", "Move")
         KeyHint("1–9", "Camera")
+        KeyHint("0 / hold OK", "Sound")
         if (state.cameras.size > 1) KeyHint("▶", "Tour")
         if (state.pageCount > 1) {
             KeyHint("CH ±", "Page")

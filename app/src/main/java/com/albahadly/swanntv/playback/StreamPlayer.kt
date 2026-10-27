@@ -107,6 +107,32 @@ class StreamPlayer(
 
     val isLive: Boolean get() = status == Status.LIVE
     val isReleased: Boolean get() = released
+    val hasAudio: Boolean get() = audio
+
+    /**
+     * Turns the camera's sound on or off on a running stream. Opens only an audio decoder
+     * (software, cheap); the video decoder is untouched.
+     */
+    fun setAudioEnabled(enabled: Boolean) {
+        if (audio == enabled) return
+        audio = enabled
+        val p = player ?: return
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, !enabled)
+            .build()
+        p.volume = if (enabled) 1f else 0f
+        AppLog.i("$debugName sound ${if (enabled) "on" else "off"}")
+        if (enabled && !released) {
+            // Media3's RTSP source can't take a dropped track back on a playing session: open
+            // the session again with audio from the start (a short blink; same decoder).
+            awaitingFrame = true
+            startedAt = SystemClock.elapsedRealtime()
+            p.stop()
+            p.setMediaSource(mediaSource(url))
+            p.prepare()
+            p.playWhenReady = true
+        }
+    }
 
     fun start(target: View) {
         startedAt = SystemClock.elapsedRealtime()

@@ -47,8 +47,16 @@ class AppController(context: Context, private val scope: CoroutineScope) {
             phoneSetupIdle = true
         },
     ) { isCurrent ->
-        PhoneSetupApi(settings = { settings }, update = ::update, tester = CameraTester(context), isCurrentSession = isCurrent)
+        PhoneSetupApi(
+            settings = { settings },
+            update = ::update,
+            tester = CameraTester(context),
+            isCurrentSession = isCurrent,
+            control = ::phoneControl,
+            logTail = AppLog::tail,
+        ).also { phoneApi = it }
     }
+    private lateinit var phoneApi: PhoneSetupApi
     /** The address in the QR code while phone setup runs, else null. */
     var phoneSetupUrl by mutableStateOf<String?>(null)
         private set
@@ -78,8 +86,36 @@ class AppController(context: Context, private val scope: CoroutineScope) {
     val saveProblem: String? get() = store.saveProblem
 
     fun update(newSettings: AppSettings) {
-        settings = newSettings
-        store.save(newSettings)
+        settings = newSettings.normalized()
+        store.save(settings)
+    }
+
+    /**
+     * The phone page's remote buttons (main thread). Works on the camera screen; from Settings
+     * it first goes back to the cameras. Returns a message when it can't be done.
+     */
+    private fun phoneControl(action: String, id: String): String? {
+        if (!started) return "The TV app isn't on screen."
+        if (screen == Screen.PIN) return "The TV is asking for the PIN."
+        if (screen == Screen.SETTINGS) {
+            if (!settings.phoneControl) return "Turn on \"Keep the phone connected\" in Phone setup on the TV first."
+            closeSettings()
+        }
+        when (action) {
+            "grid" -> viewer.close()
+            "tour" -> viewer.toggleTour()
+            "next" -> viewer.stepByUser(+1)
+            "prev" -> viewer.stepByUser(-1)
+            "group" -> showGroup(id)
+            "camera" -> {
+                val config = settings.cameras.firstOrNull { it.id == id } ?: return "That camera doesn't exist any more."
+                if (!config.enabled) return "${config.name} is hidden: show it in the grid first."
+                if (viewer.cameras.none { it.id == id }) showGroup("") // not in the current group
+                val index = viewer.cameras.firstOrNull { it.id == id }?.index ?: return "${config.name} isn't on screen."
+                viewer.showCamera(index)
+            }
+        }
+        return null
     }
 
     fun openSettings() {
@@ -89,6 +125,7 @@ class AppController(context: Context, private val scope: CoroutineScope) {
 
     private fun showSettings() {
         screen = Screen.SETTINGS
+        phoneApi.settingsOpen = true
         startPhoneSetup()
     }
 
@@ -130,9 +167,35 @@ class AppController(context: Context, private val scope: CoroutineScope) {
         return true
     }
 
+    /** The header's group chip: All → first group → … → All. The grid keeps its layout. */
+    private fun showNextGroup() {
+        val groups = settings.groups
+        if (groups.isEmpty()) return
+        val current = groups.indexOfFirst { it.id == settings.currentGroupId }
+        val next = if (current < 0) groups.first().id else groups.getOrNull(current + 1)?.id ?: ""
+        showGroup(next)
+    }
+
+    /** Shows [groupId] (or all cameras for ""), from the grid or the phone. */
+    fun showGroup(groupId: String) {
+        if (groupId.isNotEmpty() && settings.groups.none { it.id == groupId }) return
+        if (groupId == settings.currentGroupId) return
+        update(settings.copy(currentGroupId = groupId))
+        if (screen != Screen.VIEWER) return // picked up when Settings closes
+        viewer.close()
+        manager.stopDetachedTilesSoon() // tiles about to show another camera must not be reused
+        val keepFocusOnChip = viewer.focusTarget == null
+        viewer = buildViewer().also { if (keepFocusOnChip) it.focusTarget = null }
+        manager.clearPictures() // positions mean other cameras now
+        AppLog.i("showing group ${settings.currentGroup?.name ?: "all"}: ${viewer.cameras.size} camera(s)")
+        if (started) viewer.resume()
+    }
+
     fun closeSettings() {
         tester.cancel()
-        stopPhoneSetup()
+        phoneApi.settingsOpen = false
+        // The phone may stay connected as a remote for up to 15 minutes of use.
+        if (!settings.phoneControl) stopPhoneSetup()
         val before = viewer.cameras
         viewer = buildViewer() // picks up any camera or layout changes
         // Last pictures are kept per position: after a reorder, hide or delete they would
@@ -180,6 +243,7 @@ class AppController(context: Context, private val scope: CoroutineScope) {
         stopPhoneSetup() // never left running in the background
         // Leaving the app (Home, TV off) re-locks Settings: the next person needs the PIN.
         if (screen == Screen.SETTINGS && settings.hasPin) screen = Screen.PIN
+        phoneApi.settingsOpen = screen == Screen.SETTINGS
     }
 
     /**
@@ -193,12 +257,7 @@ class AppController(context: Context, private val scope: CoroutineScope) {
         manager.releaseAll()
     }
 
-    private fun buildViewer(): ViewerState {
-        manager.motionThreshold = if (settings.motionMode == MotionMode.OFF) null else settings.motionSensitivity.changedFraction
-        return newViewer()
-    }
-
-    private fun newViewer() = ViewerState(
+    private fun buildViewer() = ViewerState(
         motionOpens = settings.motionMode == MotionMode.OPEN,
         tourSeconds = settings.tourSeconds,
         cameras = CameraRepository.fromSettings(settings),
@@ -208,15 +267,20 @@ class AppController(context: Context, private val scope: CoroutineScope) {
             LayoutPreference.AUTO -> null
             LayoutPreference.ONE -> GridLayout.ONE
             LayoutPreference.FOUR -> GridLayout.FOUR
+            LayoutPreference.SIX -> GridLayout.SIX
             LayoutPreference.NINE -> GridLayout.NINE
         },
         onLayoutChanged = { layout ->
             update(settings.copy(layout = when (layout) {
                 GridLayout.ONE -> LayoutPreference.ONE
                 GridLayout.FOUR -> LayoutPreference.FOUR
+                GridLayout.SIX -> LayoutPreference.SIX
                 GridLayout.NINE -> LayoutPreference.NINE
             }))
         },
+        groupName = settings.currentGroup?.takeIf { settings.groupCameras() != null }?.name,
+        groupCount = settings.groups.size,
+        onNextGroup = ::showNextGroup,
     )
 }
 

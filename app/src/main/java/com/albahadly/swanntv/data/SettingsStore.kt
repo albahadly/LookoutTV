@@ -26,10 +26,26 @@ data class CameraConfig(
     /** RTSP over TCP (reliable, the default) or UDP. */
     val useTcp: Boolean = true,
     val enabled: Boolean = true,
+    /** Motion detection for this camera: the global setting, off, or its own sensitivity. */
+    val motion: CameraMotion = CameraMotion.DEFAULT,
+    /** Beep on the TV when this camera sees movement. */
+    val motionBeep: Boolean = false,
+    /** Play the full-quality main stream in the grid too (2×2 and 1+5 layouts; not in 3×3). */
+    val fullQuality: Boolean = false,
 )
 
-/** Grid layout preference; AUTO picks by camera count. */
-enum class LayoutPreference { AUTO, ONE, FOUR, NINE }
+/** Per-camera motion setting. */
+enum class CameraMotion { DEFAULT, OFF, LOW, MEDIUM, HIGH }
+
+/** A named subset of the cameras, shown on its own in the grid. */
+data class CameraGroup(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val cameraIds: List<String>,
+)
+
+/** Grid layout preference; AUTO picks by camera count. SIX is one big tile and five small. */
+enum class LayoutPreference { AUTO, ONE, FOUR, SIX, NINE }
 
 /** What the viewer does when it sees movement on a grid camera. */
 enum class MotionMode { OFF, HIGHLIGHT, OPEN }
@@ -57,8 +73,32 @@ data class AppSettings(
     val tourSeconds: Int = 10,
     val floatingSize: FloatingSize = FloatingSize.MEDIUM,
     val floatingCorner: FloatingCorner = FloatingCorner.BOTTOM_RIGHT,
+    val groups: List<CameraGroup> = emptyList(),
+    /** The group the grid shows, or empty for all cameras. */
+    val currentGroupId: String = "",
+    /** Keep the phone page connected (TV remote, log) for a while after leaving Settings. */
+    val phoneControl: Boolean = true,
 ) {
     val hasPin: Boolean get() = pinHash.isNotEmpty()
+
+    val currentGroup: CameraGroup? get() = groups.firstOrNull { it.id == currentGroupId }
+
+    /** Groups never point at cameras that are gone, and the current group must exist. */
+    fun normalized(): AppSettings {
+        val ids = cameras.map { it.id }.toSet()
+        val cleanGroups = groups.map { g -> g.copy(cameraIds = g.cameraIds.filter { it in ids }) }
+        return copy(groups = cleanGroups, currentGroupId = currentGroupId.takeIf { id -> cleanGroups.any { it.id == id } } ?: "")
+    }
+
+    /** The cameras the grid shows: the current group's, or all. Enabled cameras only. */
+    fun shownCameras(): List<CameraConfig> = groupCameras() ?: cameras.filter { it.enabled }
+
+    /** The current group's enabled cameras, or null when there is no group or it has none left. */
+    fun groupCameras(): List<CameraConfig>? {
+        val group = currentGroup ?: return null
+        val byId = cameras.associateBy { it.id }
+        return group.cameraIds.mapNotNull { byId[it] }.filter { it.enabled }.ifEmpty { null }
+    }
 
     fun withPin(pin: String?): AppSettings {
         if (pin.isNullOrEmpty()) return copy(pinHash = "", pinSalt = "")
@@ -70,6 +110,7 @@ data class AppSettings(
 
     companion object {
         const val MAX_CAMERAS = 16
+        const val MAX_GROUPS = 8
 
         private fun hash(pin: String, salt: String): String =
             MessageDigest.getInstance("SHA-256")
@@ -136,6 +177,13 @@ class SettingsStore(context: Context) {
             .put("tourSeconds", settings.tourSeconds)
             .put("floatingSize", settings.floatingSize.name)
             .put("floatingCorner", settings.floatingCorner.name)
+            .put("currentGroupId", settings.currentGroupId)
+            .put("phoneControl", settings.phoneControl)
+            .put("groups", JSONArray().apply {
+                settings.groups.forEach { g ->
+                    put(JSONObject().put("id", g.id).put("name", g.name).put("cameraIds", JSONArray(g.cameraIds)))
+                }
+            })
             .put("cameras", JSONArray().apply {
                 settings.cameras.forEach { c ->
                     put(JSONObject()
@@ -146,7 +194,10 @@ class SettingsStore(context: Context) {
                         .put("username", c.username)
                         .put("password", sealedPassword(c))
                         .put("useTcp", c.useTcp)
-                        .put("enabled", c.enabled))
+                        .put("enabled", c.enabled)
+                        .put("motion", c.motion.name)
+                        .put("motionBeep", c.motionBeep)
+                        .put("fullQuality", c.fullQuality))
                 }
             })
         var out: java.io.FileOutputStream? = null
@@ -220,8 +271,22 @@ class SettingsStore(context: Context) {
                 password = plain ?: "",
                 useTcp = c.optBoolean("useTcp", true),
                 enabled = c.optBoolean("enabled", true),
+                motion = runCatching { CameraMotion.valueOf(c.optString("motion")) }.getOrDefault(CameraMotion.DEFAULT),
+                motionBeep = c.optBoolean("motionBeep", false),
+                fullQuality = c.optBoolean("fullQuality", false),
             )
         }.take(AppSettings.MAX_CAMERAS)
+        val cameraIds = cameras.map { it.id }.toSet()
+        val groupsArray = json.optJSONArray("groups") ?: JSONArray()
+        val groups = (0 until groupsArray.length()).mapNotNull { i ->
+            val g = groupsArray.optJSONObject(i) ?: return@mapNotNull null
+            val ids = g.optJSONArray("cameraIds") ?: JSONArray()
+            CameraGroup(
+                id = g.optString("id").ifEmpty { UUID.randomUUID().toString() },
+                name = g.optString("name").ifEmpty { "Group ${i + 1}" },
+                cameraIds = (0 until ids.length()).map { ids.optString(it) }.distinct().filter { it in cameraIds },
+            )
+        }.distinctBy { it.id }.take(AppSettings.MAX_GROUPS)
         unreadablePasswordIds = undecryptable.keys.toSet()
         if (migrated) AppLog.i("moved logins out of camera addresses into the login fields")
         migratedOnLoad = migrated
@@ -239,6 +304,9 @@ class SettingsStore(context: Context) {
             floatingSize = runCatching { FloatingSize.valueOf(json.optString("floatingSize")) }.getOrDefault(FloatingSize.MEDIUM),
             floatingCorner = runCatching { FloatingCorner.valueOf(json.optString("floatingCorner")) }
                 .getOrDefault(FloatingCorner.BOTTOM_RIGHT),
+            groups = groups,
+            currentGroupId = json.optString("currentGroupId").takeIf { id -> groups.any { it.id == id } } ?: "",
+            phoneControl = json.optBoolean("phoneControl", true),
         )
     }
 

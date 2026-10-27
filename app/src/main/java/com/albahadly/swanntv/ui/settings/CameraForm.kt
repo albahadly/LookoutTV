@@ -24,6 +24,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.albahadly.swanntv.data.CameraConfig
+import androidx.tv.material3.Text
+import androidx.compose.ui.unit.sp
+import com.albahadly.swanntv.data.CameraMotion
 import com.albahadly.swanntv.data.SettingsStore
 import com.albahadly.swanntv.playback.CameraTester
 import com.albahadly.swanntv.ui.Palette
@@ -48,6 +51,9 @@ fun CameraForm(
     var passwordTyped by remember { mutableStateOf(false) }
     var useTcp by remember { mutableStateOf(initial.useTcp) }
     var enabled by remember { mutableStateOf(initial.enabled) }
+    var motion by remember { mutableStateOf(initial.motion) }
+    var motionBeep by remember { mutableStateOf(initial.motionBeep) }
+    var fullQuality by remember { mutableStateOf(initial.fullQuality) }
     var testLines by remember { mutableStateOf<List<Pair<String, Boolean>>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     val firstField = remember { FocusRequester() }
@@ -125,6 +131,29 @@ fun CameraForm(
                 Hint("Show in grid")
                 TvSwitch(enabled, "Show in grid") { enabled = it }
             }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Hint("Always full quality in the grid")
+                TvSwitch(fullQuality, "Always full quality in the grid") { fullQuality = it }
+            }
+        }
+        Hint("Full quality in the grid plays the main stream in the 2×2 and 1+5 layouts (one camera per page; 3×3 keeps the grid stream). If the TV can't decode it next to the other tiles, the camera falls back to its grid stream.")
+
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Hint("Motion detection for this camera")
+            TvChoice(
+                listOf(
+                    CameraMotion.DEFAULT to "As in Viewing settings",
+                    CameraMotion.OFF to "Off",
+                    CameraMotion.LOW to "Low",
+                    CameraMotion.MEDIUM to "Medium",
+                    CameraMotion.HIGH to "High",
+                ),
+                motion,
+            ) { motion = it }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            TvSwitch(motionBeep, "Beep on motion") { motionBeep = it }
+            Text("Beep on the TV when this camera sees movement", fontSize = 11.sp, color = Palette.Text)
         }
 
         testLines.forEach { (line, ok) -> Hint(line, if (ok) Palette.Text else Palette.Error) }
@@ -148,6 +177,9 @@ fun CameraForm(
                             password = password,
                             useTcp = useTcp,
                             enabled = enabled,
+                            motion = motion,
+                            motionBeep = motionBeep,
+                            fullQuality = fullQuality,
                         )
                     )
                 }

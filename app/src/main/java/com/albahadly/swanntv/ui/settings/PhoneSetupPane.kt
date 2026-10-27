@@ -29,9 +29,17 @@ import com.google.zxing.qrcode.QRCodeWriter
 
 /** Shows the QR code that opens the phone setup page. */
 @Composable
-fun PhoneSetupPane(url: String?, address: String?, code: String, idle: Boolean, onRetry: () -> Unit) {
+fun PhoneSetupPane(
+    url: String?,
+    address: String?,
+    code: String,
+    idle: Boolean,
+    keepConnected: Boolean,
+    onKeepConnected: (Boolean) -> Unit,
+    onRetry: () -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionTitle("Set up from your phone", "Typing camera addresses is much easier on a phone")
+        SectionTitle("Set up from your phone", "Typing camera addresses is much easier on a phone, and the page doubles as a remote")
         if (url == null && idle) {
             Hint("Phone setup stopped after 15 minutes without use, to keep the TV private.")
             TvButton("Start again", primary = true, onClick = onRetry)
@@ -56,15 +64,22 @@ fun PhoneSetupPane(url: String?, address: String?, code: String, idle: Boolean, 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Step(1, "Connect your phone to the same home Wi-Fi as the TV.")
                 Step(2, "Point the phone's camera at the code and open the link.")
-                Step(3, "Add, edit, test or reorder cameras on the phone. The TV updates straight away.")
+                Step(3, "Add, edit, test or reorder cameras on the phone; open a camera on the TV from the phone; read the log.")
                 Hint("No camera app? Type this address in the phone's browser:")
                 Text(address ?: url.substringBefore("/?"), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Palette.TextBright)
                 if (code.isNotEmpty()) {
                     Hint("then enter this code:")
                     Text(code.chunked(3).joinToString(" "), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Palette.TextBright)
                 }
-                Hint("The page works while Settings is open on the TV. Leaving Settings ends it, and a new code is made next time.")
+                Hint(
+                    if (keepConnected) "After you leave Settings the phone stays connected for 15 minutes of use as a remote (open cameras, tour, groups, log). Changing cameras needs Settings open on the TV. Leaving the app ends the connection."
+                    else "The page works while Settings is open on the TV. Leaving Settings ends it, and a new code is made next time."
+                )
             }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            TvSwitch(keepConnected, "Keep the phone connected after leaving Settings") { onKeepConnected(it) }
+            Text("Keep the phone connected after leaving Settings (TV remote and log)", fontSize = 12.sp, color = Palette.Text)
         }
     }
 }
