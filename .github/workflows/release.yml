@@ -1,9 +1,15 @@
 # Builds the release APK and publishes it on the GitHub Releases page.
 #
-# Run it from the Actions tab ("Release" → "Run workflow"): it reads the version from
-# app/build.gradle.kts, creates the tag v<version> if it doesn't exist, builds the signed
-# APK and attaches it to a release with the matching section of CHANGELOG.md as notes.
-# Pushing a tag v* by hand does the same.
+# Run it from the Actions tab ("Release" → "Run workflow") and type the version to release,
+# like 1.2.0. The workflow then
+#   1. writes that versionName (and the next versionCode) into app/build.gradle.kts,
+#   2. writes the CHANGELOG.md section: your "notes" input as bullet points, or an
+#      "## Unreleased" section renamed to this version, or the commits since the last release,
+#   3. builds the signed APK,
+#   4. commits the two files as "Release <version>" on the branch and tags it v<version>,
+#   5. publishes the release with the APK and its checksum, using the changelog section as notes.
+# Leave the version empty to release the version already in app/build.gradle.kts.
+# Pushing a tag v* by hand builds and publishes that commit as it is.
 #
 # Signing: add a repository secret DEBUG_KEYSTORE_BASE64 holding the project's
 # debug.keystore as base64, so the APK installs over the copy on the TV. Without it the
@@ -12,6 +18,15 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, like 1.2.0 (empty = the version already in app/build.gradle.kts)"
+        required: false
+        type: string
+      notes:
+        description: "What changed, as bullet points separated by ; (optional)"
+        required: false
+        type: string
   push:
     tags: ["v*"]
 
@@ -33,13 +48,97 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Read the version
+      - name: Set the version
         id: version
+        env:
+          REQUESTED: ${{ inputs.version }}
+          NOTES: ${{ inputs.notes }}
+          EDIT: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
-          VERSION=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Version $VERSION"
+          python3 - <<'EOF'
+          import datetime, os, pathlib, re, subprocess, sys
+
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+
+          gradle = pathlib.Path("app/build.gradle.kts")
+          text = gradle.read_text()
+          current = re.search(r'versionName = "([^"]+)"', text).group(1)
+          code = int(re.search(r"versionCode = (\d+)", text).group(1))
+          requested = os.environ.get("REQUESTED", "").strip().lstrip("vV")
+          edit = os.environ.get("EDIT") == "true"
+          notes = [n.strip() for n in re.split(r"[;\n]", os.environ.get("NOTES", "")) if n.strip()]
+          changed = []
+
+          def parts(v):
+              return tuple(int(p) for p in v.split("."))
+
+          version = current
+          if requested and requested != current:
+              if not edit:
+                  fail("A version can only be chosen when the workflow is run by hand.")
+              if not re.fullmatch(r"\d+\.\d+\.\d+", requested):
+                  fail(f"The version must look like 1.2.0, not '{requested}'.")
+              if parts(requested) <= parts(current):
+                  fail(f"{requested} is not newer than the current version {current}.")
+              text = text.replace(f'versionName = "{current}"', f'versionName = "{requested}"', 1)
+              text = text.replace(f"versionCode = {code}", f"versionCode = {code + 1}", 1)
+              gradle.write_text(text)
+              changed.append(str(gradle))
+              version = requested
+              print(f"Version {current} (code {code}) -> {version} (code {code + 1})")
+          else:
+              print(f"Version {version} (code {code})")
+
+          if edit:
+              changelog = pathlib.Path("CHANGELOG.md")
+              lines = changelog.read_text().splitlines() if changelog.exists() else ["# Changelog"]
+              heading = f"## {version} — {datetime.date.today().isoformat()}"
+              bullets = [f"- {n}" for n in notes]
+
+              def section_end(start):
+                  """Index just after the last non-blank line of the section whose heading is at [start]."""
+                  i = start + 1
+                  while i < len(lines) and not lines[i].startswith("## "):
+                      i += 1
+                  while i > start + 1 and not lines[i - 1].strip():
+                      i -= 1
+                  return i
+
+              def append_to(start):
+                  end = section_end(start)
+                  lines[end:end] = ([""] if end == start + 1 else []) + bullets
+
+              existing = next((i for i, l in enumerate(lines) if re.match(rf"## {re.escape(version)}(\s|$)", l)), None)
+              unreleased = next((i for i, l in enumerate(lines) if re.match(r"## unreleased\b", l, re.I)), None)
+              if existing is not None:
+                  if bullets:
+                      append_to(existing)
+                      changed.append(str(changelog))
+              elif unreleased is not None:
+                  lines[unreleased] = heading
+                  if bullets:
+                      append_to(unreleased)
+                  changed.append(str(changelog))
+              else:
+                  if not bullets:
+                      last = subprocess.run(["git", "describe", "--tags", "--abbrev=0"], capture_output=True, text=True).stdout.strip()
+                      span = f"{last}..HEAD" if last else "HEAD"
+                      subjects = subprocess.run(["git", "log", "--pretty=%s", span], capture_output=True, text=True).stdout.splitlines()
+                      bullets = [f"- {s}" for s in subjects if not re.match(r"Release \d", s)] or [f"- Lookout TV {version}."]
+                  # New section right under the "# Changelog" title (or at the top if there is none).
+                  title = next((i for i, l in enumerate(lines) if l.startswith("# ")), -1)
+                  block = ["", heading, ""] + bullets
+                  lines[title + 1:title + 1] = block if title >= 0 else block[1:] + [""]
+                  changed.append(str(changelog))
+              changelog.write_text("\n".join(lines).rstrip("\n") + "\n")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"version={version}\ntag=v{version}\nchanged={'true' if changed else 'false'}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f"### Lookout TV {version}\n\n" + ("Updated: " + ", ".join(changed) if changed else "No files changed") + "\n")
+          EOF
 
       - name: Restore the signing key
         env:
@@ -75,12 +174,25 @@ jobs:
           printf '\n\nInstall: `adb connect <tv-ip>:5555` then `adb install -r %s`. See the README for details.\n' "${{ steps.apk.outputs.file }}" >> notes.md
           cat notes.md
 
+      - name: Commit the version and changelog
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle.kts CHANGELOG.md
+          git commit -m "Release ${{ steps.version.outputs.version }}"
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push origin "HEAD:${{ github.ref_name }}"
+
       - name: Create the tag if needed
         if: github.event_name == 'workflow_dispatch'
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG exists"
+            if [ "$(git rev-parse "$TAG^{commit}")" != "$(git rev-parse HEAD)" ]; then
+              echo "::warning::$TAG points at an older commit; the release gets this build but the tag is not moved. Use a new version for new code."
+            fi
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

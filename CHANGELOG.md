@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Release workflow: type the version (and optional notes) when running it; it updates the build files and changelog, commits, tags and publishes.
+
 ## 1.1.0 — 2026-10-28
 
 - Renamed to **Lookout TV** (package `com.albahadly.lookouttv`), with a new logo. It installs as a new app next to the old SwannTV: move your cameras over with the phone page's backup (Include passwords) and import, then uninstall the old one.
