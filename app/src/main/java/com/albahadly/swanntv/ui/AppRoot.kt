@@ -22,6 +22,9 @@ import com.albahadly.swanntv.setup.PhoneSetupApi
 import com.albahadly.swanntv.setup.PhoneSetupServer
 import com.albahadly.swanntv.ui.settings.PinPad
 import com.albahadly.swanntv.ui.settings.SettingsScreen
+import com.albahadly.swanntv.update.UpdateManager
+import com.albahadly.swanntv.BuildConfig
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 
 enum class Screen { VIEWER, PIN, SETTINGS }
@@ -35,6 +38,8 @@ enum class Screen { VIEWER, PIN, SETTINGS }
 class AppController(context: Context, private val scope: CoroutineScope) {
 
     private val store = SettingsStore(context)
+    /** New releases on GitHub: banner in the grid, controls in Settings → About. */
+    val updates = UpdateManager(context, scope)
     private val appContext = context.applicationContext
     val manager = PlaybackManager(context)
     val tester = CameraTester(context)
@@ -54,6 +59,8 @@ class AppController(context: Context, private val scope: CoroutineScope) {
             isCurrentSession = isCurrent,
             control = ::phoneControl,
             logTail = AppLog::tail,
+            updateAction = ::phoneUpdate,
+            updateJson = ::updateJson,
         ).also { phoneApi = it }
     }
     private lateinit var phoneApi: PhoneSetupApi
@@ -88,6 +95,7 @@ class AppController(context: Context, private val scope: CoroutineScope) {
     fun update(newSettings: AppSettings) {
         settings = newSettings.normalized()
         store.save(settings)
+        updates.token = settings.githubToken
     }
 
     /**
@@ -216,7 +224,35 @@ class AppController(context: Context, private val scope: CoroutineScope) {
             Screen.SETTINGS -> startPhoneSetup() // back in Settings without a PIN: new QR code
             Screen.PIN -> Unit
         }
+        updates.token = settings.githubToken
+        updates.checkIfDue(settings.updateCheck)
     }
+
+    /** Back from the installer or another app. */
+    fun onResume() = updates.onResumed()
+
+    private fun phoneUpdate(action: String, value: String): String? {
+        when (action) {
+            "check" -> updates.check()
+            "install" -> {
+                if (updates.available == null) return "No update to install."
+                updates.install()
+            }
+            "later" -> updates.snooze()
+            "token" -> update(settings.copy(githubToken = value))
+        }
+        return null
+    }
+
+    private fun updateJson(): JSONObject = JSONObject()
+        .put("installed", BuildConfig.VERSION_NAME)
+        .put("available", updates.available?.version ?: "")
+        .put("notes", updates.available?.notes ?: "")
+        .put("status", updates.statusText())
+        .put("busy", updates.status is UpdateManager.Status.Checking || updates.status is UpdateManager.Status.Downloading)
+        .put("canInstall", updates.canInstall())
+        .put("hasToken", settings.githubToken.isNotEmpty())
+        .put("autoCheck", settings.updateCheck)
 
     /**
      * Home pressed while watching: if the floating window is on and allowed, keep the camera
@@ -287,7 +323,7 @@ class AppController(context: Context, private val scope: CoroutineScope) {
 @Composable
 fun AppRoot(app: AppController) {
     when (app.screen) {
-        Screen.VIEWER -> ViewerScreen(app.viewer, onOpenSettings = app::openSettings)
+        Screen.VIEWER -> ViewerScreen(app.viewer, onOpenSettings = app::openSettings, updates = app.updates)
         Screen.PIN -> {
             BackHandler { app.closeSettings() }
             PinPad(

@@ -41,6 +41,11 @@ class MainActivity : ComponentActivity() {
         app.onHomePressed()
     }
 
+    override fun onResume() {
+        super.onResume()
+        app.onResume()
+    }
+
     override fun onStop() {
         app.onStop()
         super.onStop()

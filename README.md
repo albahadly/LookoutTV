@@ -44,6 +44,7 @@ Kotlin · Jetpack Compose for TV · Media3 ExoPlayer (RTSP over TCP) · Android 
 - **Floating camera window**: press Home while a camera is full screen and it keeps playing in a corner over other apps (YouTube, live TV…).
 - **Settings on the TV**: add a whole recorder in one step or single cameras, test them, reorder, hide, rename, group; optional 4-digit PIN lock.
 - **Phone page**: scan a QR code and set everything up from your phone's browser (typing is far easier there), back up and restore, use the phone as a **remote**, and read the TV's **log**.
+- **Updates**: the TV checks the Releases page once a day and offers a new version in the grid: **Update now** downloads it and opens Android's installer (one OK), **Later** asks again tomorrow.
 - **Stays up**: reconnects with backoff, rebuilds the player after decoder errors, restarts frozen streams, and shows each camera's last picture instead of a black tile.
 
 ## Installing
@@ -61,7 +62,7 @@ You need the TV's IP address and ADB (network debugging) enabled on the TV.
    The first time, the TV asks "Allow USB debugging?" — choose **Always allow**. `-r` keeps your cameras, passwords and PIN when updating.
 5. SwannTV appears in the TV's apps row.
 
-Updating: download the new APK and run `adb install -r` again. Builds from the Releases page and builds you make yourself install over each other as long as they are signed with the same key (see [Building from source](#building-from-source)).
+Updating: the app offers new releases itself (see [Updates](#updates)); or download the new APK and run `adb install -r` again. Builds from the Releases page and builds you make yourself install over each other as long as they are signed with the same key (see [Building from source](#building-from-source)).
 
 ## First setup
 
@@ -138,6 +139,20 @@ adb shell appops set com.albahadly.swanntv SYSTEM_ALERT_WINDOW allow
 
 (Android's own picture-in-picture is refused by the TCL, so SwannTV draws its own window.) The remote controls the app underneath, not the window. While it plays, 4K video in another app may fail on this TV; open SwannTV to close the window if that happens.
 
+### Updates
+
+Once a day while the app is open, it asks GitHub for the latest release. When there is a newer one, a banner appears at the bottom of the grid: **Update now** downloads the APK to the TV, checks it against the published checksum and opens Android's installer, which asks once ("Install?" → OK); the app then restarts updated, with all settings kept. **Later** hides the banner for a day. Settings → About has **Check now**, the automatic check switch, and the status.
+
+Two one-time things:
+
+- **Permission to install.** Android must allow SwannTV to install apps: Settings → Apps → Security & restrictions → Unknown sources → SwannTV (the exact path varies by TV; the About pane has a button that tries to open it), or from a computer:
+  ```
+  adb shell appops set com.albahadly.swanntv REQUEST_INSTALL_PACKAGES allow
+  ```
+- **Private repository.** GitHub shows releases of a private repository only with a token. Create a fine-grained personal access token on GitHub (Settings → Developer settings → Personal access tokens → Fine-grained; repository access: only SwannTV; permissions: Contents → Read-only; a long expiry) and paste it into **Updates → GitHub token** on the phone page (or type it in Settings → About). It's stored encrypted on the TV like the camera passwords. If the repository is public, no token is needed.
+
+A sideloaded app can't update silently: the installer's confirmation is Android's, not the app's.
+
 ## Settings reference
 
 | Section | Contains |
@@ -146,7 +161,7 @@ adb shell appops set com.albahadly.swanntv SYSTEM_ALERT_WINDOW allow
 | **Phone setup** | QR code, typed address and 6-digit code, "Keep the phone connected after leaving Settings". |
 | **Viewing** | Grid layout; motion mode and sensitivity; tour seconds; floating window on/off, size and corner. |
 | **PIN lock** | Set, change or remove a 4-digit PIN for Settings. Five wrong tries lock entry for 30 s, doubling each time. Leaving the app re-locks Settings. |
-| **About** | Version, camera count, log file location. |
+| **About** | Version, camera count, log file location; updates: automatic check on/off, Check now, Update now, install permission help, GitHub token. |
 
 Everything is saved at once; there is no Save button for Settings itself. The camera list is limited to 16 cameras and 8 groups.
 
@@ -159,6 +174,7 @@ Settings → **Phone setup** on the TV shows a QR code and, below it, the addres
 - **Groups**: add, edit, delete.
 - **Grid layout**.
 - **Backup**: download the camera list as a file (tick **Include passwords** to put them in, as plain text), and load one back, adding to or replacing the current list.
+- **Updates**: status, Check now, Update the TV now / Later, and the GitHub token field.
 - **Diagnostics**: show or download the TV's log.
 
 With **Keep the phone connected** on (the default), leaving Settings keeps the phone connected as a remote (TV section, log, state) for 15 minutes of use. Changing cameras always needs Settings open on the TV. Leaving the app ends the connection; the next time Settings opens, a new QR code and code are made.

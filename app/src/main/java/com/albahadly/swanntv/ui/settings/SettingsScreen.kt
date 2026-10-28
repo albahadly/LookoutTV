@@ -41,6 +41,8 @@ import androidx.tv.material3.Text
 import com.albahadly.swanntv.BuildConfig
 import com.albahadly.swanntv.data.AppSettings
 import com.albahadly.swanntv.data.CameraConfig
+import com.albahadly.swanntv.AppLog
+import com.albahadly.swanntv.update.UpdateManager
 import com.albahadly.swanntv.data.CameraGroup
 import com.albahadly.swanntv.data.LayoutPreference
 import com.albahadly.swanntv.data.FloatingSize
@@ -285,7 +287,7 @@ fun SettingsScreen(app: AppController) {
                     onSet = { pinFlow = PinFlow.SET },
                     onRemove = { pinFlow = PinFlow.REMOVE },
                 )
-                else -> AboutPane(settings)
+                else -> AboutPane(settings, app.updates) { app.update(it) }
             }
         }
     }
@@ -569,12 +571,43 @@ private fun SecurityPane(hasPin: Boolean, onSet: () -> Unit, onRemove: () -> Uni
 }
 
 @Composable
-private fun AboutPane(settings: AppSettings) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun AboutPane(settings: AppSettings, updates: UpdateManager, onChange: (AppSettings) -> Unit) {
+    var token by remember(settings.githubToken) { mutableStateOf(settings.githubToken) }
+    val canInstall = updates.canInstall()
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 16.dp),
+    ) {
         SectionTitle("About SwannTV", "Version ${BuildConfig.VERSION_NAME}")
         Hint("${settings.cameras.size} camera(s) saved, ${settings.cameras.count { it.enabled }} shown.")
         Hint("Passwords are encrypted with an Android Keystore key (hardware-backed on most TVs).")
-        Hint("Diagnostics log: Android/data/com.albahadly.swanntv/files/swanntv-log.txt")
-        Hint("Copy it to a computer with: adb pull /sdcard/Android/data/com.albahadly.swanntv/files/swanntv-log.txt")
+        Hint("Diagnostics log: Android/data/com.albahadly.swanntv/files/swanntv-log.txt (also on the phone page).")
+
+        Spacer(Modifier.height(8.dp))
+        SectionTitle("Updates", "New releases from github.com/albahadly/SwannTV")
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            TvSwitch(settings.updateCheck, "Check for updates once a day") { onChange(settings.copy(updateCheck = it)) }
+            Text("Check for updates once a day and offer them in the grid", fontSize = 12.sp, color = Palette.Text)
+        }
+        Hint(updates.statusText(), if (updates.status is UpdateManager.Status.Failed) Palette.Error else Palette.Text)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TvButton("Check now", enabled = updates.status !is UpdateManager.Status.Checking) { updates.check() }
+            if (updates.available != null) TvButton("Update now", primary = true) { updates.install() }
+        }
+        if (!canInstall) {
+            Hint("One-time permission needed: the TV must let SwannTV install updates (Settings → Apps → Security & restrictions → Unknown sources → SwannTV), or from a computer:", Palette.Warning)
+            Text("adb shell appops set com.albahadly.swanntv REQUEST_INSTALL_PACKAGES allow", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Palette.TextBright)
+            TvButton("Open the permission screen") {
+                if (!updates.openInstallPermission()) AppLog.w("this TV has no screen for the install permission")
+            }
+        } else {
+            Hint("Updates download to the TV and open Android's installer, which asks once. Your cameras and settings are kept.")
+        }
+        Hint("Private repository? Enter a GitHub token (fine-grained, read-only on this repository). It's stored encrypted. Easier to paste on the phone page.")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TvTextField("GitHub token", token, { token = it }, password = true, width = 320.dp)
+            TvButton("Save token", enabled = token.trim() != settings.githubToken) { onChange(settings.copy(githubToken = token.trim())) }
+            if (settings.githubToken.isNotEmpty()) TvButton("Remove", danger = true) { onChange(settings.copy(githubToken = "")) }
+        }
     }
 }

@@ -37,6 +37,10 @@ class PhoneSetupApi(
     private val control: (action: String, id: String) -> String?,
     /** The last lines of the TV's log, newest last. */
     private val logTail: (lines: Int) -> String,
+    /** Updates: "check", "install", "later", or "token" with a value (main thread). Returns an error or null. */
+    private val updateAction: (action: String, value: String) -> String?,
+    /** The update state for the page, as JSON fields. */
+    private val updateJson: () -> JSONObject,
 ) {
     private class Rejected(val status: Int, message: String) : Exception(message)
 
@@ -49,7 +53,7 @@ class PhoneSetupApi(
      */
     @Volatile var settingsOpen: Boolean = false
 
-    private val alwaysAllowed = setOf("GET /state", "POST /view", "GET /log")
+    private val alwaysAllowed = setOf("GET /state", "POST /view", "GET /log", "POST /update")
 
     fun handle(token: String, method: String, path: String, query: Map<String, String>, body: String): PhoneSetupServer.Response = try {
         if (!settingsOpen && "$method $path" !in alwaysAllowed) {
@@ -69,6 +73,7 @@ class PhoneSetupApi(
             "POST /group" -> saveGroup(token, JSONObject(body))
             "POST /group/delete" -> deleteGroup(token, JSONObject(body).str("id"))
             "GET /log" -> PhoneSetupServer.Response.text(logTail((query["lines"]?.toIntOrNull() ?: 300).coerceIn(10, 2000)), 200)
+            "POST /update" -> update(token, JSONObject(body))
             else -> error("Unknown request", 404)
         }
     } catch (e: Rejected) {
@@ -258,6 +263,18 @@ class PhoneSetupApi(
         }
     }
 
+    private fun update(token: String, json: JSONObject): PhoneSetupServer.Response {
+        val action = json.str("action")
+        if (action !in setOf("check", "install", "later", "token")) return error("Unknown action.")
+        if (action == "token" && !settingsOpen) return error("Open Settings on the TV to change the token.", 409)
+        val value = json.str("token").trim()
+        if (value.length > 400 || value.any { it.isWhitespace() || it.isISOControl() }) return error("That doesn't look like a GitHub token.")
+        return mutate(token) {
+            updateAction(action, value)?.let { throw Rejected(409, it) }
+            stateJson(settings())
+        }
+    }
+
     private fun saveGroup(token: String, json: JSONObject): PhoneSetupServer.Response {
         val name = json.str("name").trim()
         if (name.isEmpty()) return error("Give the group a name.")
@@ -337,6 +354,7 @@ class PhoneSetupApi(
         .put("currentGroupId", s.currentGroupId)
         .put("maxGroups", AppSettings.MAX_GROUPS)
         .put("editable", settingsOpen)
+        .put("update", updateJson())
         .toString()
 
     private fun exportJson(s: AppSettings, withPasswords: Boolean): String = JSONObject()

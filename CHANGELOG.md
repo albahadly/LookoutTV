@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0 — 2026-10-28
+
+- In-app updates: the TV checks GitHub Releases once a day and offers new versions in the grid (Update now / Later); downloads are checksum-verified and handed to Android's installer. Controls in Settings → About and on the phone page, including a GitHub token for a private repository.
+- Pressing OK on a Settings menu item while a form is open closes the form and switches section.
+- Full-screen mute with 0.
+- Release workflow (GitHub Actions) that builds, tags and publishes the APK.
+
 ## 1.0.0 — 2026-10-28
 
 First release.

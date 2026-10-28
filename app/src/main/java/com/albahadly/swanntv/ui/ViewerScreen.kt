@@ -48,11 +48,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.tv.material3.Text
+import com.albahadly.swanntv.BuildConfig
 import com.albahadly.swanntv.model.Camera
+import com.albahadly.swanntv.update.UpdateManager
+import androidx.compose.foundation.border
 import com.albahadly.swanntv.playback.StreamPlayer
 
 @Composable
-fun ViewerScreen(state: ViewerState, onOpenSettings: () -> Unit) {
+fun ViewerScreen(state: ViewerState, onOpenSettings: () -> Unit, updates: UpdateManager? = null) {
     val focusRequesters = remember { HashMap<Int, FocusRequester>() }
     fun requester(index: Int) = focusRequesters.getOrPut(index) { FocusRequester() }
 
@@ -111,6 +114,9 @@ fun ViewerScreen(state: ViewerState, onOpenSettings: () -> Unit) {
             } else {
                 Header(state, onOpenSettings, Modifier.align(Alignment.TopCenter))
                 Footer(state, Modifier.align(Alignment.BottomCenter))
+                if (updates != null && updates.bannerVisible) {
+                    UpdateBanner(updates, Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp))
+                }
             }
         }
     }
@@ -284,6 +290,40 @@ private fun Footer(state: ViewerState, modifier: Modifier) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                 Text("Page ${state.page + 1} of ${state.pageCount}", fontSize = 10.sp, color = Palette.Quiet)
             }
+        }
+    }
+}
+
+/** "Version x.y.z is available": Update now / Later, with the download progress. */
+@Composable
+private fun UpdateBanner(updates: UpdateManager, modifier: Modifier) {
+    val release = updates.available ?: return
+    val status = updates.status
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = modifier
+            .background(Palette.Surface, RoundedCornerShape(12.dp))
+            .border(1.dp, Palette.Accent, RoundedCornerShape(12.dp))
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Column {
+            Text("SwannTV ${release.version} is available", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Palette.TextBright)
+            Text(
+                when (status) {
+                    is UpdateManager.Status.Downloading -> "Downloading… ${status.percent}%"
+                    UpdateManager.Status.Installing -> "Follow the installer, then open SwannTV again."
+                    is UpdateManager.Status.Failed -> status.message
+                    else -> release.notes.lineSequence().map { it.trim().trimStart('-', '*', ' ') }
+                        .firstOrNull { it.isNotEmpty() && !it.startsWith("#") }?.take(90) ?: "Installed: ${BuildConfig.VERSION_NAME}"
+                },
+                fontSize = 10.sp,
+                color = if (status is UpdateManager.Status.Failed) Palette.Error else Palette.Quiet,
+            )
+        }
+        if (status !is UpdateManager.Status.Downloading && status !is UpdateManager.Status.Installing) {
+            FocusChip("Update now", selected = true) { updates.install() }
+            FocusChip("Later", selected = false) { updates.snooze() }
         }
     }
 }

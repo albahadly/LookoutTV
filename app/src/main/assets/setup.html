@@ -176,6 +176,25 @@
     <p class="msg" id="backup-msg" role="status"></p>
   </section>
 
+  <section id="update-section">
+    <h2>Updates</h2>
+    <p class="sub" id="update-status">—</p>
+    <pre id="update-notes" class="hidden-el" style="margin:0 0 10px;font-size:12px;line-height:1.4;white-space:pre-wrap;word-break:break-word;color:var(--quiet)"></pre>
+    <div class="row">
+      <button id="update-check" type="button">Check now</button>
+      <button id="update-install" type="button" class="primary hidden-el">Update the TV now</button>
+      <button id="update-later" type="button" class="hidden-el">Later</button>
+    </div>
+    <p class="msg" id="update-perm" role="status"></p>
+    <label for="u-token" style="margin-top:14px">GitHub token (only for a private repository; read-only, stored encrypted on the TV)</label>
+    <div class="row">
+      <input id="u-token" type="password" autocomplete="off" placeholder="github_pat_…" style="flex:1 1 200px;width:auto">
+      <button id="u-token-save" type="button">Save token</button>
+      <button id="u-token-remove" type="button" class="danger hidden-el">Remove</button>
+    </div>
+    <p class="msg" id="update-msg" role="status"></p>
+  </section>
+
   <section>
     <h2>Diagnostics</h2>
     <p class="sub">The TV app's log, newest at the bottom. Logins are never in it.</p>
@@ -271,6 +290,45 @@ function render() {
   });
   $("layout").value = state.layout;
   renderGroups();
+  renderUpdate();
+}
+
+function renderUpdate() {
+  const u = state.update || {};
+  const editable = state.editable !== false;
+  $("update-status").textContent = u.status || ("Installed: " + (u.installed || "?"));
+  const notes = $("update-notes");
+  notes.textContent = u.notes || "";
+  notes.classList.toggle("hidden-el", !u.available || !u.notes);
+  $("update-check").disabled = !!u.busy;
+  $("update-install").classList.toggle("hidden-el", !u.available);
+  $("update-install").disabled = !!u.busy;
+  $("update-later").classList.toggle("hidden-el", !u.available);
+  msg($("update-perm"), u.available && u.canInstall === false
+    ? "The TV must first allow SwannTV to install updates: Settings → Apps → Security & restrictions → Unknown sources → SwannTV, or `adb shell appops set com.albahadly.swanntv REQUEST_INSTALL_PACKAGES allow`."
+    : "", "err");
+  $("u-token").placeholder = u.hasToken ? "Saved — leave empty to keep it" : "github_pat_…";
+  $("u-token").disabled = !editable;
+  $("u-token-save").disabled = !editable;
+  $("u-token-remove").classList.toggle("hidden-el", !u.hasToken || !editable);
+}
+
+async function updateAction(action, token) {
+  try {
+    state = await api("/update", { action, token: token || "" });
+    render();
+    msg($("update-msg"), action === "token" ? "Token saved." : "", "ok");
+    if (action === "check" || action === "install") pollUpdate(8);
+  } catch (e) { msg($("update-msg"), e.message, "err"); }
+}
+
+// The check and the download take a while: refresh a few times to show their progress.
+function pollUpdate(times) {
+  if (times <= 0) return;
+  setTimeout(async () => {
+    await refresh();
+    if ((state.update || {}).busy) pollUpdate(times - 1);
+  }, 1500);
 }
 
 function renderGroups() {
@@ -537,6 +595,16 @@ $("log-download").addEventListener("click", async () => {
     msg($("log-msg"), "Log saved to this phone.", "ok");
   } catch (e) { msg($("log-msg"), e.message, "err"); }
 });
+
+$("update-check").addEventListener("click", () => updateAction("check"));
+$("update-install").addEventListener("click", () => updateAction("install"));
+$("update-later").addEventListener("click", () => updateAction("later"));
+$("u-token-save").addEventListener("click", () => {
+  const t = $("u-token").value.trim();
+  if (!t) { msg($("update-msg"), "Paste the token first.", "err"); return; }
+  updateAction("token", t).then(() => { $("u-token").value = ""; });
+});
+$("u-token-remove").addEventListener("click", () => { if (confirm("Remove the GitHub token from the TV?")) updateAction("token", ""); });
 
 $("layout").addEventListener("change", async e => {
   try { state = await api("/layout", { layout: e.target.value }); render(); } catch (err) { setStatus(err.message, true); }

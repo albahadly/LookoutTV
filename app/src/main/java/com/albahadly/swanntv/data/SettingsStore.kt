@@ -78,6 +78,10 @@ data class AppSettings(
     val currentGroupId: String = "",
     /** Keep the phone page connected (TV remote, log) for a while after leaving Settings. */
     val phoneControl: Boolean = true,
+    /** Look for a new release on GitHub once a day and offer to install it. */
+    val updateCheck: Boolean = true,
+    /** GitHub token for a private repository (fine-grained, read-only); stored encrypted. */
+    val githubToken: String = "",
 ) {
     val hasPin: Boolean get() = pinHash.isNotEmpty()
 
@@ -179,6 +183,8 @@ class SettingsStore(context: Context) {
             .put("floatingCorner", settings.floatingCorner.name)
             .put("currentGroupId", settings.currentGroupId)
             .put("phoneControl", settings.phoneControl)
+            .put("updateCheck", settings.updateCheck)
+            .put("githubToken", sealedToken(settings.githubToken))
             .put("groups", JSONArray().apply {
                 settings.groups.forEach { g ->
                     put(JSONObject().put("id", g.id).put("name", g.name).put("cameraIds", JSONArray(g.cameraIds)))
@@ -212,6 +218,18 @@ class SettingsStore(context: Context) {
             saveProblem = "Settings couldn't be written to the TV's storage (${e.javaClass.simpleName}). Changes may be lost when the app closes."
         }
         unreadablePasswordIds = undecryptable.keys.toSet()
+    }
+
+    private var tokenCache: Pair<String, String>? = null // plain to sealed
+    private var undecryptableToken = ""
+
+    private fun sealedToken(plain: String): String {
+        if (plain.isEmpty()) return undecryptableToken
+        tokenCache?.let { (p, sealed) -> if (p == plain) return sealed }
+        val sealed = SecretBox.encrypt(plain) ?: return tokenCache?.second ?: undecryptableToken
+        tokenCache = plain to sealed
+        undecryptableToken = ""
+        return sealed
     }
 
     /** The ciphertext to store for [c]'s password, never losing a saved one. */
@@ -307,6 +325,12 @@ class SettingsStore(context: Context) {
             groups = groups,
             currentGroupId = json.optString("currentGroupId").takeIf { id -> groups.any { it.id == id } } ?: "",
             phoneControl = json.optBoolean("phoneControl", true),
+            updateCheck = json.optBoolean("updateCheck", true),
+            githubToken = run {
+                val sealed = json.optString("githubToken")
+                val plain = SecretBox.decrypt(sealed)
+                if (plain == null) { undecryptableToken = sealed; "" } else { if (sealed.isNotEmpty()) tokenCache = plain to sealed; plain }
+            },
         )
     }
 
