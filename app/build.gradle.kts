@@ -32,8 +32,8 @@ android {
         applicationId = "com.albahadly.lookouttv"
         minSdk = 28
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.2.0"
 
         buildConfigField("String", "NVR_HOST", nvr("host", ""))
         buildConfigField("String", "NVR_PORT", nvr("port", "554"))
