@@ -16,8 +16,8 @@
     <application
         android:allowBackup="false"
         android:banner="@drawable/banner"
-        android:icon="@drawable/banner"
-        android:label="SwannTV"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Lookout TV"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
         android:usesCleartextTraffic="true">
 

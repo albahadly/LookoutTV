@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>SwannTV setup</title>
+<title>Lookout TV setup</title>
 <style>
   :root { --bg:#0E1116; --surface:#171B22; --tile:#1B2027; --border:#2E3541; --text:#E8EAED; --quiet:#AEB6C2; --accent:#5B9BFF; --onaccent:#0B1220; --error:#FFA39B; --ok:#6EE7A0; }
   * { box-sizing: border-box; }
@@ -41,7 +41,7 @@
 </head>
 <body>
 <header>
-  <h1>SwannTV setup</h1>
+  <h1>Lookout TV setup</h1>
   <span id="status">Connecting…</span>
 </header>
 <main>
@@ -215,7 +215,7 @@
 let token = (() => {
   let t = new URLSearchParams(location.search).get("t") || "";
   try {
-    if (t) sessionStorage.setItem("swanntv-t", t); else t = sessionStorage.getItem("swanntv-t") || "";
+    if (t) sessionStorage.setItem("lookouttv-t", t); else t = sessionStorage.getItem("lookouttv-t") || "";
   } catch (e) { /* private mode: the key just won't survive a reload */ }
   try { history.replaceState(null, "", location.pathname); } catch (e) {}
   return t;
@@ -305,7 +305,7 @@ function renderUpdate() {
   $("update-install").disabled = !!u.busy;
   $("update-later").classList.toggle("hidden-el", !u.available);
   msg($("update-perm"), u.available && u.canInstall === false
-    ? "The TV must first allow SwannTV to install updates: Settings → Apps → Security & restrictions → Unknown sources → SwannTV, or `adb shell appops set com.albahadly.swanntv REQUEST_INSTALL_PACKAGES allow`."
+    ? "The TV must first allow Lookout TV to install updates: Settings → Apps → Security & restrictions → Unknown sources → Lookout TV, or `adb shell appops set com.albahadly.lookouttv REQUEST_INSTALL_PACKAGES allow`."
     : "", "err");
   $("u-token").placeholder = u.hasToken ? "Saved — leave empty to keep it" : "github_pat_…";
   $("u-token").disabled = !editable;
@@ -589,7 +589,7 @@ $("log-download").addEventListener("click", async () => {
     const blob = new Blob([await fetchLog()], { type: "text/plain" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "swanntv-log-" + new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-") + ".txt";
+    a.download = "lookouttv-log-" + new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-") + ".txt";
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     msg($("log-msg"), "Log saved to this phone.", "ok");
@@ -618,7 +618,7 @@ $("export-btn").addEventListener("click", async () => {
     const blob = new Blob([await res.text()], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "swanntv-cameras-" + new Date().toISOString().slice(0, 10) + ".json";
+    a.download = "lookouttv-cameras-" + new Date().toISOString().slice(0, 10) + ".json";
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     msg($("backup-msg"), "Backup saved to this phone.", "ok");
@@ -636,7 +636,7 @@ $("import-file").addEventListener("change", async e => {
     render();
     msg($("backup-msg"), "Backup loaded.", "ok");
   } catch (err) {
-    msg($("backup-msg"), err instanceof SyntaxError ? "That file isn't a SwannTV backup." : err.message, "err");
+    msg($("backup-msg"), err instanceof SyntaxError ? "That file isn't a Lookout TV backup." : err.message, "err");
   } finally {
     e.target.value = "";
   }
@@ -644,7 +644,7 @@ $("import-file").addEventListener("change", async e => {
 
 function showPair(reason) {
   token = "";
-  try { sessionStorage.removeItem("swanntv-t"); } catch (e) {}
+  try { sessionStorage.removeItem("lookouttv-t"); } catch (e) {}
   $("app").classList.add("hidden-el");
   $("pair-section").classList.remove("hidden-el");
   setStatus("Not connected", true);
@@ -668,7 +668,7 @@ async function pair() {
     const data = await res.json().catch(() => ({ error: "The TV sent an unreadable answer." }));
     if (!res.ok || !data.token) throw new Error(data.error || ("Error " + res.status));
     token = data.token;
-    try { sessionStorage.setItem("swanntv-t", token); } catch (e) {}
+    try { sessionStorage.setItem("lookouttv-t", token); } catch (e) {}
     msg($("pair-msg"), "");
     startApp();
   } catch (e) {

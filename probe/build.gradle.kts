@@ -20,11 +20,11 @@ fun nvr(key: String, default: String): String {
 }
 
 android {
-    namespace = "com.albahadly.swanntv.probe"
+    namespace = "com.albahadly.lookouttv.probe"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.albahadly.swanntv.probe"
+        applicationId = "com.albahadly.lookouttv.probe"
         minSdk = 28
         targetSdk = 36
         versionCode = 1

@@ -14,7 +14,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "SwannTV"
+rootProject.name = "LookoutTV"
 
-include(":app")   // SwannTV, the camera viewer
+include(":app")   // Lookout TV, the camera viewer
 include(":probe") // test tool that measures what a TV can play

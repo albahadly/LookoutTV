@@ -1,10 +1,12 @@
-# SwannTV
+<p align="center"><img src="docs/banner.png" alt="Lookout TV" width="640"></p>
+
+# Lookout TV
 
 An Android TV app for watching RTSP security cameras. Built for a Swann NVR on a TCL Google TV, but it works with any camera or recorder that has an RTSP stream (Swann, Hikvision, Dahua/Lorex/Amcrest presets included).
 
 Kotlin · Jetpack Compose for TV · Media3 ExoPlayer (RTSP over TCP) · Android 9+ (minSdk 28) · no cloud, no account: everything stays on your home network.
 
-**Install:** download `SwannTV-x.y.z.apk` from the [Releases](https://github.com/albahadly/SwannTV/releases) page and see [Installing](#installing). No build needed.
+**Install:** download `LookoutTV-x.y.z.apk` from the [Releases](https://github.com/albahadly/LookoutTV/releases) page and see [Installing](#installing). No build needed.
 
 ---
 
@@ -53,14 +55,14 @@ You need the TV's IP address and ADB (network debugging) enabled on the TV.
 
 1. **Enable network debugging on the TV.** Settings → System → About → press **Android TV OS build** seven times to unlock Developer options, then Settings → System → Developer options → turn on **USB debugging** and **Network debugging** (names vary slightly by TV). Note the TV's IP address under Network.
 2. **Get ADB on your computer.** It comes with Android Studio (`platform-tools` folder of the SDK) or on its own from [developer.android.com/tools/releases/platform-tools](https://developer.android.com/tools/releases/platform-tools).
-3. **Download** the latest `SwannTV-x.y.z.apk` from the [Releases](https://github.com/albahadly/SwannTV/releases) page.
+3. **Download** the latest `LookoutTV-x.y.z.apk` from the [Releases](https://github.com/albahadly/LookoutTV/releases) page.
 4. **Install:**
    ```
    adb connect 192.168.1.50:5555        (your TV's address)
-   adb install -r SwannTV-1.0.0.apk
+   adb install -r LookoutTV-1.1.0.apk
    ```
    The first time, the TV asks "Allow USB debugging?" — choose **Always allow**. `-r` keeps your cameras, passwords and PIN when updating.
-5. SwannTV appears in the TV's apps row.
+5. Lookout TV appears in the TV's apps row.
 
 Updating: the app offers new releases itself (see [Updates](#updates)); or download the new APK and run `adb install -r` again. Builds from the Releases page and builds you make yourself install over each other as long as they are signed with the same key (see [Building from source](#building-from-source)).
 
@@ -129,15 +131,15 @@ The grid compares each live tile with the picture from a second earlier (a 64×3
 
 ### Floating camera window
 
-With a camera full screen, press **Home** and it keeps playing in a corner over whatever you open next, on its light grid stream, without sound. Open SwannTV again to close it. Off by default: turn it on in **Settings → Viewing → Floating camera window**, and pick its size (small to half screen) and corner.
+With a camera full screen, press **Home** and it keeps playing in a corner over whatever you open next, on its light grid stream, without sound. Open Lookout TV again to close it. Off by default: turn it on in **Settings → Viewing → Floating camera window**, and pick its size (small to half screen) and corner.
 
 It needs one permission that TVs have no menu for; run once from a computer:
 
 ```
-adb shell appops set com.albahadly.swanntv SYSTEM_ALERT_WINDOW allow
+adb shell appops set com.albahadly.lookouttv SYSTEM_ALERT_WINDOW allow
 ```
 
-(Android's own picture-in-picture is refused by the TCL, so SwannTV draws its own window.) The remote controls the app underneath, not the window. While it plays, 4K video in another app may fail on this TV; open SwannTV to close the window if that happens.
+(Android's own picture-in-picture is refused by the TCL, so Lookout TV draws its own window.) The remote controls the app underneath, not the window. While it plays, 4K video in another app may fail on this TV; open Lookout TV to close the window if that happens.
 
 ### Updates
 
@@ -145,11 +147,11 @@ Once a day while the app is open, it asks GitHub for the latest release. When th
 
 Two one-time things:
 
-- **Permission to install.** Android must allow SwannTV to install apps: Settings → Apps → Security & restrictions → Unknown sources → SwannTV (the exact path varies by TV; the About pane has a button that tries to open it), or from a computer:
+- **Permission to install.** Android must allow Lookout TV to install apps: Settings → Apps → Security & restrictions → Unknown sources → Lookout TV (the exact path varies by TV; the About pane has a button that tries to open it), or from a computer:
   ```
-  adb shell appops set com.albahadly.swanntv REQUEST_INSTALL_PACKAGES allow
+  adb shell appops set com.albahadly.lookouttv REQUEST_INSTALL_PACKAGES allow
   ```
-- **Private repository.** GitHub shows releases of a private repository only with a token. Create a fine-grained personal access token on GitHub (Settings → Developer settings → Personal access tokens → Fine-grained; repository access: only SwannTV; permissions: Contents → Read-only; a long expiry) and paste it into **Updates → GitHub token** on the phone page (or type it in Settings → About). It's stored encrypted on the TV like the camera passwords. If the repository is public, no token is needed.
+- **Private repository.** GitHub shows releases of a private repository only with a token. Create a fine-grained personal access token on GitHub (Settings → Developer settings → Personal access tokens → Fine-grained; repository access: only Lookout TV; permissions: Contents → Read-only; a long expiry) and paste it into **Updates → GitHub token** on the phone page (or type it in Settings → About). It's stored encrypted on the TV like the camera passwords. If the repository is public, no token is needed.
 
 A sideloaded app can't update silently: the installer's confirmation is Android's, not the app's.
 
@@ -191,7 +193,7 @@ With **Keep the phone connected** on (the default), leaving Settings keeps the p
 
 - **The log** is the first thing to look at. On the phone page, **Diagnostics → Show log**, or from a computer:
   ```
-  adb pull /sdcard/Android/data/com.albahadly.swanntv/files/swanntv-log.txt
+  adb pull /sdcard/Android/data/com.albahadly.lookouttv/files/lookouttv-log.txt
   ```
   It rotates at 1 MB and never contains logins.
 - **A tile says Connecting… / Reconnecting… / Offline**: the camera isn't answering. Use **Test** in its form: it tells you whether the address, port, path or login is wrong.
@@ -250,7 +252,7 @@ Other TVs may allow more. Run the probe module on them to see.
 ## Project layout
 
 ```
-app/src/main/java/com/albahadly/swanntv/
+app/src/main/java/com/albahadly/lookouttv/
   MainActivity.kt            Activity: lifecycle, Home key
   AppLog.kt                  Rotating log file, login redaction
   data/   SettingsStore.kt   Settings model and JSON persistence (AtomicFile)
@@ -269,5 +271,6 @@ app/src/main/java/com/albahadly/swanntv/
           PhoneSetupApi.kt   The page's JSON API
   floating/                  Floating camera window and its foreground service
 app/src/main/assets/setup.html   The phone page (vanilla JS)
+docs/make_logo.py                Draws the logo, TV banner and launcher icons
 probe/                           The decoder probe app
 ```

@@ -23,4 +23,4 @@ probe/release/
 *.hprof
 
 # App logs pulled from the TV
-swanntv-log*.txt
+lookouttv-log*.txt

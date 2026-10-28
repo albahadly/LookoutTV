@@ -10,7 +10,7 @@
         android:allowBackup="false"
         android:banner="@drawable/banner"
         android:icon="@drawable/banner"
-        android:label="SwannTV Probe"
+        android:label="Lookout TV Probe"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
         android:usesCleartextTraffic="true">
 

@@ -2,6 +2,7 @@
 
 ## 1.1.0 — 2026-10-28
 
+- Renamed to **Lookout TV** (package `com.albahadly.lookouttv`), with a new logo. It installs as a new app next to the old SwannTV: move your cameras over with the phone page's backup (Include passwords) and import, then uninstall the old one.
 - In-app updates: the TV checks GitHub Releases once a day and offers new versions in the grid (Update now / Later); downloads are checksum-verified and handed to Android's installer. Controls in Settings → About and on the phone page, including a GitHub token for a private repository.
 - Pressing OK on a Settings menu item while a form is open closes the form and switches section.
 - Full-screen mute with 0.

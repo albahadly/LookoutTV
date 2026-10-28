@@ -58,7 +58,7 @@ jobs:
       - name: Name the APK
         id: apk
         run: |
-          OUT="SwannTV-${{ steps.version.outputs.version }}.apk"
+          OUT="LookoutTV-${{ steps.version.outputs.version }}.apk"
           cp app/build/outputs/apk/release/app-release.apk "$OUT"
           sha256sum "$OUT" | tee "$OUT.sha256"
           echo "file=$OUT" >> "$GITHUB_OUTPUT"
@@ -71,7 +71,7 @@ jobs:
             /^## / { if (found) exit; found = index($0, v) > 0; next }
             found { print }
           ' CHANGELOG.md > notes.md
-          if [ ! -s notes.md ]; then echo "SwannTV $VERSION" > notes.md; fi
+          if [ ! -s notes.md ]; then echo "Lookout TV $VERSION" > notes.md; fi
           printf '\n\nInstall: `adb connect <tv-ip>:5555` then `adb install -r %s`. See the README for details.\n' "${{ steps.apk.outputs.file }}" >> notes.md
           cat notes.md
 
@@ -84,7 +84,7 @@ jobs:
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$TAG" -m "SwannTV ${{ steps.version.outputs.version }}"
+            git tag -a "$TAG" -m "Lookout TV ${{ steps.version.outputs.version }}"
             git push origin "$TAG"
           fi
 
@@ -98,5 +98,5 @@ jobs:
             gh release upload "$TAG" "$FILE" "$FILE.sha256" --clobber
             gh release edit "$TAG" --notes-file notes.md
           else
-            gh release create "$TAG" "$FILE" "$FILE.sha256" --title "SwannTV ${{ steps.version.outputs.version }}" --notes-file notes.md
+            gh release create "$TAG" "$FILE" "$FILE.sha256" --title "Lookout TV ${{ steps.version.outputs.version }}" --notes-file notes.md
           fi
