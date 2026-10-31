@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.3 — 2026-10-31
+
+- Bump version to 1.2.3 and update version code to 7
+
 ## 1.2.2 — 2026-10-31
 
 - Update check: runs when the app opens and every hour while it's on screen, instead of once a day. A check that fails (Wi-Fi still connecting after the TV wakes) is retried after 5 minutes, and an update already found is no longer forgotten when Android closes the app.
