@@ -1,6 +1,7 @@
 package com.albahadly.lookouttv.ui
 
 import android.content.Context
+import android.os.PowerManager
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
@@ -84,6 +85,8 @@ class AppController(context: Context, private val scope: CoroutineScope) {
         private set
 
     private var started = false
+    /** Android hinted the user is leaving, and the app hasn't stopped or come back yet. */
+    private var userLeaving = false
     private var wrongPins = 0
     private var pinLockedUntil = 0L
 
@@ -229,7 +232,10 @@ class AppController(context: Context, private val scope: CoroutineScope) {
     }
 
     /** Back from the installer or another app. */
-    fun onResume() = updates.onResumed()
+    fun onResume() {
+        userLeaving = false // the app never left: whatever covered it has gone
+        updates.onResumed()
+    }
 
     private fun phoneUpdate(action: String, value: String): String? {
         when (action) {
@@ -255,14 +261,25 @@ class AppController(context: Context, private val scope: CoroutineScope) {
         .put("autoCheck", settings.updateCheck)
 
     /**
-     * Home pressed while watching: if the floating window is on and allowed, keep the camera
+     * Android's hint that the user is leaving. It also comes when the TV puts its own prompt
+     * over the app after a long time without keys, and then the app stays on screen and never
+     * stops, so the floating window waits for [onStop].
+     */
+    fun onUserLeaving() {
+        userLeaving = true
+    }
+
+    /**
+     * Left the app while watching: if the floating window is on and allowed, keep the camera
      * playing in a small window over other apps. Everything else stops first, so the floating
      * stream never overlaps another decoder (the 4K one fails on this TV if it does).
      */
-    fun onHomePressed() {
+    private fun showFloatingWindow() {
         val allowed = FloatingCamera.canShow(appContext)
-        AppLog.i("home pressed: floating window setting=${settings.pictureInPicture} permission=$allowed screen=$screen")
-        if (!settings.pictureInPicture || !allowed || screen != Screen.VIEWER || !started) return
+        // Still "interactive" after Home; not when the TV went to sleep under its own prompt.
+        val screenOn = appContext.getSystemService(PowerManager::class.java).isInteractive
+        AppLog.i("left the app: floating window setting=${settings.pictureInPicture} permission=$allowed screen=$screen screenOn=$screenOn")
+        if (!settings.pictureInPicture || !allowed || !screenOn || screen != Screen.VIEWER || !started) return
         val camera = viewer.floatingCandidate() ?: return // only from full screen
         viewer.pause() // releases every stream now (the 4K one included)
         if (FloatingCamera.show(
@@ -273,6 +290,8 @@ class AppController(context: Context, private val scope: CoroutineScope) {
     }
 
     fun onStop() {
+        if (userLeaving) showFloatingWindow()
+        userLeaving = false
         started = false
         tester.cancel()
         viewer.pause()

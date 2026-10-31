@@ -35,10 +35,10 @@ class MainActivity : ComponentActivity() {
         app.onStart()
     }
 
-    /** Home pressed: maybe keep a camera playing in a floating window over other apps. */
+    /** Home pressed, or the TV opened something of its own: only a hint until [onStop] follows. */
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        app.onHomePressed()
+        app.onUserLeaving()
     }
 
     override fun onResume() {

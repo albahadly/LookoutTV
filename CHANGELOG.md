@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1 — 2026-10-31
+
+- Floating camera window no longer appears over the app when the TV puts its own prompt on screen during a long full-screen view, and no longer opens as the TV goes to sleep.
+
 ## 1.2.0 — 2026-10-28
 
 - Release workflow: type the version (and optional notes) when running it; it updates the build files and changelog, commits, tags and publishes.
