@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.5 — 2026-10-31
+
+- Bump version to 1.2.5 and update version code to 9
+
 ## 1.2.4 — 2026-10-31
 
 - The update banner takes the remote's focus when it appears, so Update now and Later can be pressed. Later now hides the banner straight away.
