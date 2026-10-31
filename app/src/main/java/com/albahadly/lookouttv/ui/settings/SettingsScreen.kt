@@ -586,8 +586,8 @@ private fun AboutPane(settings: AppSettings, updates: UpdateManager, onChange: (
         Spacer(Modifier.height(8.dp))
         SectionTitle("Updates", "New releases from github.com/albahadly/LookoutTV")
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            TvSwitch(settings.updateCheck, "Check for updates once a day") { onChange(settings.copy(updateCheck = it)) }
-            Text("Check for updates once a day and offer them in the grid", fontSize = 12.sp, color = Palette.Text)
+            TvSwitch(settings.updateCheck, "Check for updates automatically") { onChange(settings.copy(updateCheck = it)) }
+            Text("Check for updates when the app opens and every hour, and offer them in the grid", fontSize = 12.sp, color = Palette.Text)
         }
         Hint(updates.statusText(), if (updates.status is UpdateManager.Status.Failed) Palette.Error else Palette.Text)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -604,7 +604,8 @@ private fun AboutPane(settings: AppSettings, updates: UpdateManager, onChange: (
             Hint("Updates download to the TV and open Android's installer, which asks once. Your cameras and settings are kept.")
         }
         Hint("Private repository? Enter a GitHub token (fine-grained, read-only on this repository). It's stored encrypted. Easier to paste on the phone page.")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        // Bottom: the field's label sits above its box, which is as tall as the buttons.
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
             TvTextField("GitHub token", token, { token = it }, password = true, width = 320.dp)
             TvButton("Save token", enabled = token.trim() != settings.githubToken) { onChange(settings.copy(githubToken = token.trim())) }
             if (settings.githubToken.isNotEmpty()) TvButton("Remove", danger = true) { onChange(settings.copy(githubToken = "")) }

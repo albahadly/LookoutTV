@@ -78,7 +78,7 @@ data class AppSettings(
     val currentGroupId: String = "",
     /** Keep the phone page connected (TV remote, log) for a while after leaving Settings. */
     val phoneControl: Boolean = true,
-    /** Look for a new release on GitHub once a day and offer to install it. */
+    /** Look for a new release on GitHub automatically and offer to install it. */
     val updateCheck: Boolean = true,
     /** GitHub token for a private repository (fine-grained, read-only); stored encrypted. */
     val githubToken: String = "",

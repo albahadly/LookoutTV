@@ -56,7 +56,8 @@ class UpdateManager(private val context: Context, private val scope: CoroutineSc
 
     private companion object {
         const val REPO = "albahadly/LookoutTV"
-        const val CHECK_EVERY_MS = 24 * 60 * 60_000L
+        const val CHECK_EVERY_MS = 60 * 60_000L
+        const val RETRY_AFTER_MS = 5 * 60_000L
         const val SNOOZE_MS = 24 * 60 * 60_000L
         const val PREFS = "updates"
     }
@@ -71,7 +72,8 @@ class UpdateManager(private val context: Context, private val scope: CoroutineSc
     /** When the last check ran (wall clock), for the About pane. */
     var lastCheckedAt by mutableLongStateOf(prefs.getLong("lastCheckedAt", 0L))
         private set
-    private var lastCheckElapsed = 0L
+    /** When [checkIfDue] may look again ([SystemClock.elapsedRealtime], which also runs while the TV is off). */
+    private var nextCheckAt = 0L
     private var job: Job? = null
 
     /** Token for a private repository, or empty. Held in memory; the store keeps it encrypted. */
@@ -87,11 +89,13 @@ class UpdateManager(private val context: Context, private val scope: CoroutineSc
             return !(snoozedVersion == release.version && System.currentTimeMillis() < snoozedUntil)
         }
 
-    /** Called when the app comes to the front: at most one check a day. */
+    /**
+     * Called when the app opens and regularly while it's on screen. Not kept across restarts:
+     * [available] isn't either, so a newly started app always looks once.
+     */
     fun checkIfDue(enabled: Boolean) {
-        if (!enabled) return
-        val now = System.currentTimeMillis()
-        if (now - lastCheckedAt < CHECK_EVERY_MS && SystemClock.elapsedRealtime() - lastCheckElapsed < CHECK_EVERY_MS) return
+        if (!enabled || status is Status.Installing) return
+        if (SystemClock.elapsedRealtime() < nextCheckAt) return
         check()
     }
 
@@ -102,8 +106,9 @@ class UpdateManager(private val context: Context, private val scope: CoroutineSc
         job = scope.launch {
             val result = withContext(Dispatchers.IO) { runCatching { fetchLatest() } }
             lastCheckedAt = System.currentTimeMillis()
-            lastCheckElapsed = SystemClock.elapsedRealtime()
             prefs.edit().putLong("lastCheckedAt", lastCheckedAt).apply()
+            // A failure is often just the TV's Wi-Fi still connecting after it wakes up.
+            nextCheckAt = SystemClock.elapsedRealtime() + if (result.isSuccess) CHECK_EVERY_MS else RETRY_AFTER_MS
             result.onSuccess { release ->
                 if (release != null && isNewer(release.version, BuildConfig.VERSION_NAME)) {
                     AppLog.i("update available: ${release.version} (installed ${BuildConfig.VERSION_NAME})")

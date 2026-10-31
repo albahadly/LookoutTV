@@ -27,6 +27,9 @@ import com.albahadly.lookouttv.update.UpdateManager
 import com.albahadly.lookouttv.BuildConfig
 import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 enum class Screen { VIEWER, PIN, SETTINGS }
 
@@ -87,6 +90,8 @@ class AppController(context: Context, private val scope: CoroutineScope) {
     private var started = false
     /** Android hinted the user is leaving, and the app hasn't stopped or come back yet. */
     private var userLeaving = false
+    /** Looks for updates while the app is on screen: the TV may stay on the cameras for days. */
+    private var updateTicker: Job? = null
     private var wrongPins = 0
     private var pinLockedUntil = 0L
 
@@ -228,7 +233,13 @@ class AppController(context: Context, private val scope: CoroutineScope) {
             Screen.PIN -> Unit
         }
         updates.token = settings.githubToken
-        updates.checkIfDue(settings.updateCheck)
+        updateTicker?.cancel()
+        updateTicker = scope.launch {
+            while (true) {
+                updates.checkIfDue(settings.updateCheck)
+                delay(60_000)
+            }
+        }
     }
 
     /** Back from the installer or another app. */
@@ -293,6 +304,7 @@ class AppController(context: Context, private val scope: CoroutineScope) {
         if (userLeaving) showFloatingWindow()
         userLeaving = false
         started = false
+        updateTicker?.cancel()
         tester.cancel()
         viewer.pause()
         stopPhoneSetup() // never left running in the background

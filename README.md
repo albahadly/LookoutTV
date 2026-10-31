@@ -46,7 +46,7 @@ Kotlin · Jetpack Compose for TV · Media3 ExoPlayer (RTSP over TCP) · Android 
 - **Floating camera window**: press Home while a camera is full screen and it keeps playing in a corner over other apps (YouTube, live TV…).
 - **Settings on the TV**: add a whole recorder in one step or single cameras, test them, reorder, hide, rename, group; optional 4-digit PIN lock.
 - **Phone page**: scan a QR code and set everything up from your phone's browser (typing is far easier there), back up and restore, use the phone as a **remote**, and read the TV's **log**.
-- **Updates**: the TV checks the Releases page once a day and offers a new version in the grid: **Update now** downloads it and opens Android's installer (one OK), **Later** asks again tomorrow.
+- **Updates**: the TV checks the Releases page when the app opens and every hour, and offers a new version in the grid: **Update now** downloads it and opens Android's installer (one OK), **Later** asks again tomorrow.
 - **Stays up**: reconnects with backoff, rebuilds the player after decoder errors, restarts frozen streams, and shows each camera's last picture instead of a black tile.
 
 ## Installing
@@ -143,7 +143,7 @@ adb shell appops set com.albahadly.lookouttv SYSTEM_ALERT_WINDOW allow
 
 ### Updates
 
-Once a day while the app is open, it asks GitHub for the latest release. When there is a newer one, a banner appears at the bottom of the grid: **Update now** downloads the APK to the TV, checks it against the published checksum and opens Android's installer, which asks once ("Install?" → OK); the app then restarts updated, with all settings kept. **Later** hides the banner for a day. Settings → About has **Check now**, the automatic check switch, and the status.
+When the app opens, and every hour while it's on screen, it asks GitHub for the latest release (a check that fails, for example while the TV's Wi-Fi reconnects, is retried after 5 minutes). When there is a newer one, a banner appears at the bottom of the grid: **Update now** downloads the APK to the TV, checks it against the published checksum and opens Android's installer, which asks once ("Install?" → OK); the app then restarts updated, with all settings kept. **Later** hides the banner for a day. Settings → About has **Check now**, the automatic check switch, and the status.
 
 Two one-time things:
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.2 — 2026-10-31
+
+- Update check: runs when the app opens and every hour while it's on screen, instead of once a day. A check that fails (Wi-Fi still connecting after the TV wakes) is retried after 5 minutes, and an update already found is no longer forgotten when Android closes the app.
+- Settings → About: the GitHub token buttons line up with the field.
+
 ## 1.2.1 — 2026-10-31
 
 - Floating camera window no longer appears over the app when the TV puts its own prompt on screen during a long full-screen view, and no longer opens as the TV goes to sleep.
