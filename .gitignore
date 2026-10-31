@@ -24,3 +24,5 @@ probe/release/
 
 # App logs pulled from the TV
 lookouttv-log*.txt
+.serena/project.yml
+.serena/.gitignore
