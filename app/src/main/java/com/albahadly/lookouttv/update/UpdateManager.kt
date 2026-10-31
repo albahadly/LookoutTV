@@ -72,6 +72,9 @@ class UpdateManager(private val context: Context, private val scope: CoroutineSc
     /** When the last check ran (wall clock), for the About pane. */
     var lastCheckedAt by mutableLongStateOf(prefs.getLong("lastCheckedAt", 0L))
         private set
+    /** "Later": Compose state, so the banner goes at once. */
+    private var snoozedVersion by mutableStateOf(prefs.getString("snoozedVersion", "").orEmpty())
+    private var snoozedUntil by mutableLongStateOf(prefs.getLong("snoozedUntil", 0L))
     /** When [checkIfDue] may look again ([SystemClock.elapsedRealtime], which also runs while the TV is off). */
     private var nextCheckAt = 0L
     private var job: Job? = null
@@ -84,8 +87,6 @@ class UpdateManager(private val context: Context, private val scope: CoroutineSc
         get() {
             val release = available ?: return false
             if (status is Status.Downloading || status is Status.Installing) return true
-            val snoozedVersion = prefs.getString("snoozedVersion", "")
-            val snoozedUntil = prefs.getLong("snoozedUntil", 0L)
             return !(snoozedVersion == release.version && System.currentTimeMillis() < snoozedUntil)
         }
 
@@ -109,6 +110,7 @@ class UpdateManager(private val context: Context, private val scope: CoroutineSc
             prefs.edit().putLong("lastCheckedAt", lastCheckedAt).apply()
             // A failure is often just the TV's Wi-Fi still connecting after it wakes up.
             nextCheckAt = SystemClock.elapsedRealtime() + if (result.isSuccess) CHECK_EVERY_MS else RETRY_AFTER_MS
+            if (System.currentTimeMillis() >= snoozedUntil) snoozedUntil = 0L // "Later" is over: show the banner again
             result.onSuccess { release ->
                 if (release != null && isNewer(release.version, BuildConfig.VERSION_NAME)) {
                     AppLog.i("update available: ${release.version} (installed ${BuildConfig.VERSION_NAME})")
@@ -128,8 +130,9 @@ class UpdateManager(private val context: Context, private val scope: CoroutineSc
     /** "Later": hide the banner for this version for a day. */
     fun snooze() {
         val release = available ?: return
-        prefs.edit().putString("snoozedVersion", release.version).putLong("snoozedUntil", System.currentTimeMillis() + SNOOZE_MS).apply()
-        available = release.copy() // nudge observers
+        snoozedVersion = release.version
+        snoozedUntil = System.currentTimeMillis() + SNOOZE_MS
+        prefs.edit().putString("snoozedVersion", snoozedVersion).putLong("snoozedUntil", snoozedUntil).apply()
     }
 
     /** "Update now": download the APK, check it, and open the installer. */

@@ -55,7 +55,7 @@ fun Key.isSelect(): Boolean =
 
 /** A focusable pill button for the header (layout picker). */
 @Composable
-fun FocusChip(text: String, selected: Boolean, onClick: () -> Unit) {
+fun FocusChip(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val background = when {
         focused -> Palette.TextBright
@@ -64,7 +64,7 @@ fun FocusChip(text: String, selected: Boolean, onClick: () -> Unit) {
     }
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier
+        modifier = modifier
             .onFocusChanged { focused = it.isFocused }
             .onKeyEvent {
                 if (it.type == KeyEventType.KeyUp && it.key.isSelect()) {

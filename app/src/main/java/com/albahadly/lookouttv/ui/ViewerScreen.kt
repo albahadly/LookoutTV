@@ -78,6 +78,24 @@ fun ViewerScreen(state: ViewerState, onOpenSettings: () -> Unit, updates: Update
         runCatching { requester(index).requestFocus() }
     }
 
+    // The update banner's buttons take focus when they appear (after the effects above, so
+    // they win over a tile). When they go, focus must return to a tile or the remote stops working.
+    val updateFocus = remember { FocusRequester() }
+    val updateOffered = updates != null && updates.bannerVisible && !state.isFullscreen && state.cameras.isNotEmpty() &&
+        updates.status !is UpdateManager.Status.Downloading && updates.status !is UpdateManager.Status.Installing
+    var hadUpdateOffer by remember { mutableStateOf(false) }
+    LaunchedEffect(updateOffered) {
+        val hadOffer = hadUpdateOffer
+        hadUpdateOffer = updateOffered
+        if (updateOffered) {
+            withFrameNanos { }
+            runCatching { updateFocus.requestFocus() }
+        } else if (hadOffer && !state.isFullscreen) {
+            val visible = state.visibleCameras.map { it.index }
+            state.focusTarget = state.focusedIndex?.takeIf { it in visible } ?: visible.firstOrNull()
+        }
+    }
+
     Box(
         Modifier
             .fillMaxSize()
@@ -115,7 +133,7 @@ fun ViewerScreen(state: ViewerState, onOpenSettings: () -> Unit, updates: Update
                 Header(state, onOpenSettings, Modifier.align(Alignment.TopCenter))
                 Footer(state, Modifier.align(Alignment.BottomCenter))
                 if (updates != null && updates.bannerVisible) {
-                    UpdateBanner(updates, Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp))
+                    UpdateBanner(updates, updateFocus, Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp))
                 }
             }
         }
@@ -296,7 +314,7 @@ private fun Footer(state: ViewerState, modifier: Modifier) {
 
 /** "Version x.y.z is available": Update now / Later, with the download progress. */
 @Composable
-private fun UpdateBanner(updates: UpdateManager, modifier: Modifier) {
+private fun UpdateBanner(updates: UpdateManager, updateFocus: FocusRequester, modifier: Modifier) {
     val release = updates.available ?: return
     val status = updates.status
     Row(
@@ -322,7 +340,7 @@ private fun UpdateBanner(updates: UpdateManager, modifier: Modifier) {
             )
         }
         if (status !is UpdateManager.Status.Downloading && status !is UpdateManager.Status.Installing) {
-            FocusChip("Update now", selected = true) { updates.install() }
+            FocusChip("Update now", selected = true, Modifier.focusRequester(updateFocus)) { updates.install() }
             FocusChip("Later", selected = false) { updates.snooze() }
         }
     }

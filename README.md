@@ -143,7 +143,7 @@ adb shell appops set com.albahadly.lookouttv SYSTEM_ALERT_WINDOW allow
 
 ### Updates
 
-When the app opens, and every hour while it's on screen, it asks GitHub for the latest release (a check that fails, for example while the TV's Wi-Fi reconnects, is retried after 5 minutes). When there is a newer one, a banner appears at the bottom of the grid: **Update now** downloads the APK to the TV, checks it against the published checksum and opens Android's installer, which asks once ("Install?" → OK); the app then restarts updated, with all settings kept. **Later** hides the banner for a day. Settings → About has **Check now**, the automatic check switch, and the status.
+When the app opens, and every hour while it's on screen, it asks GitHub for the latest release (a check that fails, for example while the TV's Wi-Fi reconnects, is retried after 5 minutes). When there is a newer one, a banner appears at the bottom of the grid, with the remote's focus on it: **Update now** downloads the APK to the TV, checks it against the published checksum and opens Android's installer, which asks once ("Install?" → OK); the app then restarts updated, with all settings kept. **Later** hides the banner for a day. Settings → About has **Check now**, the automatic check switch, and the status.
 
 Two one-time things:
 
